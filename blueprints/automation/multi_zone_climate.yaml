@@ -18,18 +18,18 @@ blueprint:
       description: When this schedule window ends
       selector:
         time: {}
-    enabled:
+    enabled_flag:
       name: Enable Automation
       description: Toggle this schedule on/off
-      default: true
       selector:
-        boolean: {}
+        entity:
+          domain: input_boolean
     manual_override:
       name: Manual Override Flag
       description: Pauses schedule when turned on
-      default: false
       selector:
-        boolean: {}
+        entity:
+          domain: input_boolean
     # Shared head-unit
     head_unit:
       name: Climate Head-Unit
@@ -92,6 +92,15 @@ blueprint:
           min: 20
           max: 100
           unit_of_measurement: "%"
+    damper_delay:
+      name: Damper Update Delay
+      description: Seconds to wait between zone changes
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: "s"
     # Zones
     zones:
       name: Zones Configuration
@@ -133,7 +142,7 @@ trigger:
 condition:
   - condition: template
     # Only while enabled
-    value_template: "{{ is_state( !input.enabled, 'true' ) }}"
+    value_template: "{{ is_state(!input enabled_flag, 'on') }}"
   - condition: state
     entity_id: !input manual_override
     state: 'off'
@@ -143,21 +152,25 @@ condition:
 
 action:
   - variables:
+      zones: !input zones
       low: "{{ float( !input.low_temp ) }}"
       high: "{{ float( !input.high_temp ) }}"
       dry_t: "{{ float( !input.dry_temp ) }}"
       hum_h: "{{ float( !input.hum_high ) }}"
       heat_sp: "{{ float( !input.heat_set ) }}"
       cool_sp: "{{ float( !input.cool_set ) }}"
+      damper_delay: "{{ int(!input.damper_delay) }}"
       # Gather zone readings
       zone_data: >
         {% set z=[] %}
-        {% for zone in blueprint.inputs.zones %}
-          {% set t = states(zone.temp_sensor)|float %}
-          {% set h = states(zone.humidity_sensor)|float %}
-          {% set heat_score = (low - t) if t < low else 0 %}
-          {% set cool_score = (t - high) if t > high else 0 %}
-          {% set dry_score  = (h - hum_h) if h > hum_h else 0 %}
+        {% for zone in zones %}
+          {% set t_raw = states(zone.temp_sensor) %}
+          {% set t = t_raw | float if t_raw not in ['unknown','unavailable'] else none %}
+          {% set h_raw = states(zone.humidity_sensor) %}
+          {% set h = h_raw | float if h_raw not in ['unknown','unavailable'] else none %}
+          {% set heat_score = (low - t) if (t is not none and t < low) else 0 %}
+          {% set cool_score = (t - high) if (t is not none and t > high) else 0 %}
+          {% set dry_score  = (h - hum_h) if (h is not none and h > hum_h) else 0 %}
           {% set urgency = [heat_score, cool_score, dry_score] | max %}
           {% set _ = z.append({
             'switch': zone.damper_switch,
@@ -167,15 +180,20 @@ action:
           }) %}
         {% endfor %}
         {{ z | sort(attribute='urgency', reverse=true) }}
-      # Overall scores
-      heat_score: "{{ zone_data | map(attribute='urgency') | max if zone_data | selectattr('urgency','>','0') else 0 }}"
-      # Determine mode by highest score among heat, cool, dry
-      mode: >
-        {% set scores = {
-          'heat': (low - (zone_data | map(attribute='temp') | min)) if (zone_data | map(attribute='temp') | min) < low else 0,
-          'cool': ((zone_data | map(attribute='temp') | max) - high) if (zone_data | map(attribute='temp') | max) > high else 0,
-          'dry': ((zone_data | map(attribute='hum')  | max) - hum_h) if (zone_data | map(attribute='hum')  | max) > hum_h else 0
+      # Summarize zone extremes
+      min_temp: "{{ zone_data | map(attribute='temp') | select('!=', none) | min(default=None) }}"
+      max_temp: "{{ zone_data | map(attribute='temp') | select('!=', none) | max(default=None) }}"
+      max_hum:  "{{ zone_data | map(attribute='hum')  | select('!=', none) | max(default=None) }}"
+      # Score each potential mode
+      scores: >
+        {% set s = {
+          'heat': (low - min_temp) if min_temp is not none and min_temp < low else 0,
+          'cool': (max_temp - high) if max_temp is not none and max_temp > high else 0,
+          'dry':  (max_hum - hum_h) if max_hum is not none and max_hum > hum_h else 0
         } %}
+        {{ s }}
+      # Determine mode by highest score
+      mode: >
         {% set best = scores | dictsort(attribute=1, reverse=true) | first %}
         {% if best[1] > 0 %}{{ best[0] }}{% else %}off{% endif %}
       # Choose head-unit setpoint
@@ -203,7 +221,7 @@ action:
   - repeat:
       for_each: "{{ zone_data }}"
       sequence:
-        - delay: "00:00:10"
+        - delay: "00:00:{{ damper_delay }}"
         - choose:
             - conditions: "{{ repeat.item.urgency > 0 }}"
               sequence:
@@ -215,4 +233,4 @@ action:
                 target:
                   entity_id: "{{ repeat.item.switch }}"
 
-mode: single
+mode: restart
