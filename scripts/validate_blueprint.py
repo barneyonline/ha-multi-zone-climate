@@ -1,11 +1,32 @@
 #!/usr/bin/env python3
 import sys
-import yaml
+try:
+    import yaml
+except ModuleNotFoundError:
+    yaml = None
+
+def _load_yaml(fp):
+    """Load YAML while ignoring unknown tags like !input."""
+    if yaml is None:
+        raise RuntimeError("PyYAML not installed")
+    class Loader(yaml.SafeLoader):
+        pass
+    def unknown(loader, tag_suffix, node):
+        if isinstance(node, yaml.ScalarNode):
+            return loader.construct_scalar(node)
+        if isinstance(node, yaml.SequenceNode):
+            return loader.construct_sequence(node)
+        return loader.construct_mapping(node)
+    Loader.add_multi_constructor('!', unknown)
+    return yaml.load(fp, Loader=Loader)
 
 def validate(path):
     with open(path, 'r', encoding='utf-8') as f:
         try:
-            data = yaml.safe_load(f)
+            data = _load_yaml(f)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return False
         except yaml.YAMLError as exc:
             print(f"YAML error in {path}: {exc}", file=sys.stderr)
             return False

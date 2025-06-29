@@ -15,30 +15,36 @@ or newer before importing.
 When creating an automation from the blueprint you will need to provide:
 
 - **Schedule Start/End Times** – the daily window during which the system operates.
+- **Active Days** – days of the week when the schedule is enabled.
 - **Climate Head-Unit** – the shared climate entity to control.
 - **Temperature & Humidity Thresholds** – values that trigger heating, cooling or dry mode.
 - **Zone Configuration** – choose each zone's damper switch then add one or more
   temperature and humidity sensors (up to eight zones).
 - **Enable/Override Flags** – input_boolean entities used to enable the schedule and to pause it manually.
 - **Damper Update Delay** – seconds to wait between damper adjustments.
+- **Hysteresis Values** – optional buffers before heating, cooling or drying engage.
+- **Zone Overrides** – per-zone thresholds and optional area selection.
 
 ### Example Zone Configuration
 
 ```yaml
 zones:
   - name: Living Room
+    area: living_room
     damper_switch: switch.living_room_damper
     temp_sensors:
       - sensor.living_room_temperature
-      - sensor.living_room_temperature_2
     humidity_sensors:
       - sensor.living_room_humidity
+    low_temp: 18
   - name: Bedroom
+    area: bedroom
     damper_switch: switch.bedroom_damper
     temp_sensors:
       - sensor.bedroom_temperature
     humidity_sensors:
       - sensor.bedroom_humidity
+    high_temp: 25
 ```
 
 Once configured, the automation will automatically set the head-unit's mode and temperature and toggle individual dampers based on zone urgency.
