@@ -4,13 +4,7 @@ This repository provides a Home Assistant blueprint that coordinates a single HV
 
 ## Importing the Blueprint
 
-1. In Home Assistant, navigate to **Settings → Automations & Scenes → Blueprints**.
-2. Click **Import Blueprint** and paste the following URL:
-   ```
-   https://raw.githubusercontent.com/USER/REPO/main/blueprints/automation/multi_zone_climate.yaml
-   ```
-   Replace `USER` and `REPO` with this repository's owner and name if different.
-3. Confirm the import.
+   [![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?url=https://github.com/barneyonline/ha-multi-zone-climate/blob/main/blueprints/automation/multi_zone_climate.yaml)
 
 ## Configuration
 
