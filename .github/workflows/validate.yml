@@ -1,15 +1,18 @@
-name: Validate Home Assistant config
+name: Validate Home Assistant blueprint
 
 on:
   pull_request:
   push:
 
 jobs:
-  ha-config-check:
+  blueprint-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Validate Home Assistant configuration
-        uses: frenck/action-home-assistant@v1
+      - uses: actions/setup-python@v4
         with:
-          path: ./
+          python-version: '3.x'
+      - name: Install dependencies
+        run: pip install pyyaml
+      - name: Validate blueprint format
+        run: python scripts/validate_blueprint.py blueprints/automation/multi_zone_climate.yaml
