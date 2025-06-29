@@ -105,10 +105,37 @@ blueprint:
     zones:
       name: Zones Configuration
       description: |
-        List each zone’s temp & humidity sensors plus its
-        damper switch.
+        Configure up to 8 zones. For each zone choose the damper
+        switch then add one or more temperature and humidity sensors.
+      default:
+        - name: Zone 1
+          damper_switch: ""
+          temp_sensors: []
+          humidity_sensors: []
       selector:
         object:
+          multiple: true
+          properties:
+            name:
+              type: string
+              description: Friendly name
+            damper_switch:
+              description: Switch controlling this zone’s damper
+              selector:
+                entity:
+                  domain: switch
+            temp_sensors:
+              description: Temperature sensors for this zone
+              selector:
+                entity:
+                  domain: sensor
+                  multiple: true
+            humidity_sensors:
+              description: Humidity sensors for this zone
+              selector:
+                entity:
+                  domain: sensor
+                  multiple: true
 
 trigger:
   - platform: time
@@ -144,10 +171,18 @@ action:
       zone_data: >
         {% set z=[] %}
         {% for zone in zones %}
-          {% set t_raw = states(zone.temp_sensor) %}
-          {% set t = t_raw | float if t_raw not in ['unknown','unavailable'] else none %}
-          {% set h_raw = states(zone.humidity_sensor) %}
-          {% set h = h_raw | float if h_raw not in ['unknown','unavailable'] else none %}
+          {% set temp_vals = zone.temp_sensors
+            | map('states')
+            | reject('in', ['unknown','unavailable'])
+            | map('float')
+            | list %}
+          {% set t = (temp_vals | sum / temp_vals | length) if temp_vals | length > 0 else none %}
+          {% set hum_vals = zone.humidity_sensors
+            | map('states')
+            | reject('in', ['unknown','unavailable'])
+            | map('float')
+            | list %}
+          {% set h = (hum_vals | sum / hum_vals | length) if hum_vals | length > 0 else none %}
           {% set heat_score = (low - t) if (t is not none and t < low) else 0 %}
           {% set cool_score = (t - high) if (t is not none and t > high) else 0 %}
           {% set dry_score  = (h - hum_h) if (h is not none and h > hum_h) else 0 %}
