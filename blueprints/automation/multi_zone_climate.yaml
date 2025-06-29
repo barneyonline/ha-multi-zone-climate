@@ -109,26 +109,6 @@ blueprint:
         damper switch.
       selector:
         object:
-          multiple: true
-          properties:
-            name:
-              type: string
-              description: Friendly name
-            temp_sensor:
-              description: Temperature sensor for this zone
-              selector:
-                entity:
-                  domain: sensor
-            humidity_sensor:
-              description: Humidity sensor for this zone
-              selector:
-                entity:
-                  domain: sensor
-            damper_switch:
-              description: Switch controlling this zone’s damper
-              selector:
-                entity:
-                  domain: switch
 
 trigger:
   - platform: time
