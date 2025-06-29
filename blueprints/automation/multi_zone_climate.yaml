@@ -20,6 +20,35 @@ blueprint:
       description: When this schedule window ends
       selector:
         time: {}
+    days:
+      name: Active Days
+      description: Days of the week when this schedule runs
+      default:
+        - mon
+        - tue
+        - wed
+        - thu
+        - fri
+        - sat
+        - sun
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Monday
+              value: mon
+            - label: Tuesday
+              value: tue
+            - label: Wednesday
+              value: wed
+            - label: Thursday
+              value: thu
+            - label: Friday
+              value: fri
+            - label: Saturday
+              value: sat
+            - label: Sunday
+              value: sun
     enabled_flag:
       name: Enable Automation
       description: Toggle this schedule on/off
@@ -76,6 +105,36 @@ blueprint:
           min: 15
           max: 35
           unit_of_measurement: "°C"
+    heat_hysteresis:
+      name: Heat Hysteresis
+      description: Degrees below the low threshold to trigger heating
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.5
+          unit_of_measurement: "°C"
+    cool_hysteresis:
+      name: Cool Hysteresis
+      description: Degrees above the high threshold to trigger cooling
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.5
+          unit_of_measurement: "°C"
+    dry_hysteresis:
+      name: Dry Hysteresis
+      description: Percent above the humidity threshold to trigger dry mode
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          unit_of_measurement: "%"
     dry_temp:
       name: Dry-Mode Temperature Threshold
       description: Above this + humidity high → dry
@@ -111,9 +170,14 @@ blueprint:
         switch then add one or more temperature and humidity sensors.
       default:
         - name: Zone 1
+          area: null
           damper_switch: ""
           temp_sensors: []
           humidity_sensors: []
+          low_temp: null
+          high_temp: null
+          dry_temp: null
+          hum_high: null
       selector:
         object:
           multiple: true
@@ -121,6 +185,10 @@ blueprint:
             name:
               type: string
               description: Friendly name
+            area:
+              description: Home Assistant area for this zone
+              selector:
+                area: {}
             damper_switch:
               description: Switch controlling this zone’s damper
               selector:
@@ -138,6 +206,34 @@ blueprint:
                 entity:
                   domain: sensor
                   multiple: true
+            low_temp:
+              description: Override low temperature threshold
+              selector:
+                number:
+                  min: 5
+                  max: 30
+                  unit_of_measurement: "°C"
+            high_temp:
+              description: Override high temperature threshold
+              selector:
+                number:
+                  min: 15
+                  max: 35
+                  unit_of_measurement: "°C"
+            dry_temp:
+              description: Override dry-mode temperature threshold
+              selector:
+                number:
+                  min: 5
+                  max: 30
+                  unit_of_measurement: "°C"
+            hum_high:
+              description: Override high humidity threshold
+              selector:
+                number:
+                  min: 20
+                  max: 100
+                  unit_of_measurement: "%"
 
 trigger:
   - platform: time
@@ -158,6 +254,7 @@ condition:
   - condition: time
     after: !input start_time
     before: !input end_time
+    weekday: !input days
 
 action:
   - variables:
@@ -168,33 +265,47 @@ action:
       hum_h: "{{ float( !input.hum_high ) }}"
       heat_sp: "{{ float( !input.heat_set ) }}"
       cool_sp: "{{ float( !input.cool_set ) }}"
+      heat_buf: "{{ float( !input.heat_hysteresis ) }}"
+      cool_buf: "{{ float( !input.cool_hysteresis ) }}"
+      dry_buf: "{{ float( !input.dry_hysteresis ) }}"
       damper_delay: "{{ int(!input.damper_delay) }}"
       # Gather zone readings
       zone_data: >
         {% set z=[] %}
         {% for zone in zones %}
-          {% set temp_vals = zone.temp_sensors
-            | map('states')
-            | reject('in', ['unknown','unavailable'])
-            | map('float')
-            | list %}
-          {% set t = (temp_vals | sum / temp_vals | length) if temp_vals | length > 0 else none %}
-          {% set hum_vals = zone.humidity_sensors
-            | map('states')
-            | reject('in', ['unknown','unavailable'])
-            | map('float')
-            | list %}
-          {% set h = (hum_vals | sum / hum_vals | length) if hum_vals | length > 0 else none %}
-          {% set heat_score = (low - t) if (t is not none and t < low) else 0 %}
-          {% set cool_score = (t - high) if (t is not none and t > high) else 0 %}
-          {% set dry_score  = (h - hum_h) if (h is not none and h > hum_h) else 0 %}
-          {% set urgency = [heat_score, cool_score, dry_score] | max %}
-          {% set _ = z.append({
-            'switch': zone.damper_switch,
-            'temp': t,
-            'hum': h,
-            'urgency': urgency
-          }) %}
+          {% if not zone.damper_switch or (zone.temp_sensors | count == 0 and zone.humidity_sensors | count == 0) %}
+            {{ log('Skipping zone ' ~ (zone.name or zone.area or 'unknown') ~ ' due to missing configuration', 'warning') }}
+          {% else %}
+            {% set temp_vals = zone.temp_sensors
+              | map('states')
+              | reject('in', ['unknown','unavailable'])
+              | map('float')
+              | list %}
+            {% set t = (temp_vals | sum / temp_vals | length) if temp_vals | length > 0 else none %}
+            {% set hum_vals = zone.humidity_sensors
+              | map('states')
+              | reject('in', ['unknown','unavailable'])
+              | map('float')
+              | list %}
+            {% set h = (hum_vals | sum / hum_vals | length) if hum_vals | length > 0 else none %}
+            {% set z_low = (zone.low_temp | default(low)) | float %}
+            {% set z_high = (zone.high_temp | default(high)) | float %}
+            {% set z_dry_t = (zone.dry_temp | default(dry_t)) | float %}
+            {% set z_hum_h = (zone.hum_high | default(hum_h)) | float %}
+            {% set heat_score = (z_low - t) if (t is not none and t < z_low - heat_buf) else 0 %}
+            {% set cool_score = (t - z_high) if (t is not none and t > z_high + cool_buf) else 0 %}
+            {% set dry_score  = (h - z_hum_h) if (h is not none and h > z_hum_h + dry_buf and t is not none and t > z_dry_t) else 0 %}
+            {% set urgency = [heat_score, cool_score, dry_score] | max %}
+            {% set _ = z.append({
+              'switch': zone.damper_switch,
+              'temp': t,
+              'hum': h,
+              'heat': heat_score,
+              'cool': cool_score,
+              'dry': dry_score,
+              'urgency': urgency
+            }) %}
+          {% endif %}
         {% endfor %}
         {{ z | sort(attribute='urgency', reverse=true) }}
       # Summarize zone extremes
@@ -203,12 +314,11 @@ action:
       max_hum:  "{{ zone_data | map(attribute='hum')  | select('!=', none) | max(default=None) }}"
       # Score each potential mode
       scores: >
-        {% set s = {
-          'heat': (low - min_temp) if min_temp is not none and min_temp < low else 0,
-          'cool': (max_temp - high) if max_temp is not none and max_temp > high else 0,
-          'dry':  (max_hum - hum_h) if max_hum is not none and max_hum > hum_h else 0
-        } %}
-        {{ s }}
+        {{ {
+          'heat': (zone_data | map(attribute='heat') | max(default=0)),
+          'cool': (zone_data | map(attribute='cool') | max(default=0)),
+          'dry':  (zone_data | map(attribute='dry')  | max(default=0))
+        } }}
       # Determine mode by highest score
       mode: >
         {% set best = scores | dictsort(attribute=1, reverse=true) | first %}
