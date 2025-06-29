@@ -6,6 +6,8 @@ blueprint:
     staggers per-zone damper control by urgency. Respects manual overrides and
     includes hysteresis.
   domain: automation
+  homeassistant: 2024.5.0
+  source_url: https://github.com/barneyonline/ha-multi-zone-climate/blob/main/blueprints/automation/multi_zone_climate.yaml
   input:
     # Scheduling
     start_time:

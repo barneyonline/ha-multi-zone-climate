@@ -6,6 +6,10 @@ This repository provides a Home Assistant blueprint that coordinates a single HV
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fbarneyonline%2Fha-multi-zone-climate%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmulti_zone_climate.yaml)
 
+This blueprint uses object selectors with `multiple` and `properties`. These were
+introduced in **Home Assistant 2024.5**. Ensure your instance is running 2024.5
+or newer before importing.
+
 ## Configuration
 
 When creating an automation from the blueprint you will need to provide:
