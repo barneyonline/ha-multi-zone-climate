@@ -228,9 +228,9 @@ action:
                 - service: switch.turn_on
                   target:
                     entity_id: "{{ repeat.item.switch }}"
-            default:
-              - service: switch.turn_off
-                target:
-                  entity_id: "{{ repeat.item.switch }}"
+        default:
+          - service: switch.turn_off
+            target:
+              entity_id: "{{ repeat.item.switch }}"
 
 mode: restart
