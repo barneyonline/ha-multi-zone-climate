@@ -6,7 +6,8 @@ blueprint:
     staggers per-zone damper control by urgency. Respects manual overrides and
     includes hysteresis.
   domain: automation
-  homeassistant: 2024.5.0
+  homeassistant:
+    min_version: 2024.5.0
   source_url: https://github.com/barneyonline/ha-multi-zone-climate/blob/main/blueprints/automation/multi_zone_climate.yaml
   input:
     # Scheduling
@@ -181,53 +182,54 @@ blueprint:
       selector:
         object:
           multiple: true
-          properties:
-            name:
-              type: string
+          fields:
+            - name: name
               description: Friendly name
-            area:
+              selector:
+                text: {}
+            - name: area
               description: Home Assistant area for this zone
               selector:
                 area: {}
-            damper_switch:
+            - name: damper_switch
               description: Switch controlling this zone’s damper
               selector:
                 entity:
                   domain: switch
-            temp_sensors:
+            - name: temp_sensors
               description: Temperature sensors for this zone
               selector:
                 entity:
                   domain: sensor
                   multiple: true
-            humidity_sensors:
+            - name: humidity_sensors
               description: Humidity sensors for this zone
               selector:
                 entity:
                   domain: sensor
                   multiple: true
-            low_temp:
+            - name: low_temp
               description: Override low temperature threshold
               selector:
                 number:
                   min: 5
                   max: 30
                   unit_of_measurement: "°C"
-            high_temp:
+            - name: high_temp
               description: Override high temperature threshold
               selector:
                 number:
                   min: 15
                   max: 35
                   unit_of_measurement: "°C"
-            dry_temp:
+            - name: dry_temp
               description: Override dry-mode temperature threshold
               selector:
                 number:
                   min: 5
                   max: 30
                   unit_of_measurement: "°C"
-            hum_high:
+            - name: hum_high
               description: Override high humidity threshold
               selector:
                 number:
