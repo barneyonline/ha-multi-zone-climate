@@ -7,7 +7,7 @@ blueprint:
     includes hysteresis.
   domain: automation
   homeassistant:
-    min_version: 2024.5.0
+    min_version: 2025.6
   source_url: https://github.com/barneyonline/ha-multi-zone-climate/blob/main/blueprints/automation/multi_zone_climate.yaml
   input:
     # Scheduling
@@ -183,60 +183,59 @@ blueprint:
         object:
           multiple: true
           fields:
-            - name: name
-              description: Friendly name
-              selector:
-                text: {}
-            - name: area
-              description: Home Assistant area for this zone
-              selector:
-                area: {}
-            - name: damper_switch
-              description: Switch controlling this zone’s damper
-              selector:
-                entity:
-                  domain: switch
-            - name: temp_sensors
-              description: Temperature sensors for this zone
-              selector:
-                entity:
-                  domain: sensor
-                  multiple: true
-            - name: humidity_sensors
-              description: Humidity sensors for this zone
-              selector:
-                entity:
-                  domain: sensor
-                  multiple: true
-            - name: low_temp
-              description: Override low temperature threshold
-              selector:
-                number:
-                  min: 5
-                  max: 30
-                  unit_of_measurement: "°C"
-            - name: high_temp
-              description: Override high temperature threshold
-              selector:
-                number:
-                  min: 15
-                  max: 35
-                  unit_of_measurement: "°C"
-            - name: dry_temp
-              description: Override dry-mode temperature threshold
-              selector:
-                number:
-                  min: 5
-                  max: 30
-                  unit_of_measurement: "°C"
-            - name: hum_high
-              description: Override high humidity threshold
-              selector:
-                number:
-                  min: 20
-                  max: 100
-                  unit_of_measurement: "%"
-
+          name:
+            label: Friendly name
+            selector:
+              text: {}
+          area:
+            label: Home Assistant area for this zone
+            selector:
+              area: {}
+          damper_switch:
+            label: Switch controlling this zone’s damper
+            selector:
+              entity:
+                domain: switch
+          temp_sensors:
+            label: Temperature sensors for this zone
+            selector:
+              entity:
+                domain: sensor
+                multiple: true
+          humidity_sensors:
+            label: Humidity sensors for this zone
+            selector:
+              entity:
+                domain: sensor
+                multiple: true
+          low_temp:
+            label: Override low temperature threshold
+            selector:
+              number:
+                min: 5
+                max: 30
+                unit_of_measurement: "°C"
+          high_temp:
+            label: Override high temperature threshold
+            selector:
+              number:
+                min: 15
+                max: 35
+                unit_of_measurement: "°C"
+          dry_temp:
+            label: Override dry-mode temperature threshold
+            selector:
+              number:
+                min: 5
+                max: 30
+                unit_of_measurement: "°C"
+          hum_high:
+            label: Override high humidity threshold
+            selector:
+              number:
+                min: 20
+                max: 100
+                unit_of_measurement: "%"
 trigger:
   - platform: time
     at: !input start_time
