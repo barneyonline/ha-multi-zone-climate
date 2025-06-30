@@ -1,0 +1,36 @@
+name: Validate Home Assistant blueprints
+
+on:
+  pull_request:
+    # only run if any YAML under blueprints/ changes
+    paths:
+      - 'blueprints/**/*.ya?ml'
+  push:
+    branches: [main]
+    paths:
+      - 'blueprints/**/*.ya?ml'
+
+jobs:
+  blueprint-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Install Home Assistant Core (no extras)
+      - name: Install Home Assistant Core
+        run: |
+          pip install "homeassistant==2025.6.0"
+
+      # Validate all blueprints touched in the PR (or all on push)
+      - name: Validate blueprints
+        run: |
+          CHANGED=$(git diff --name-only \
+                     ${{ github.event.pull_request.base.sha || 'HEAD~1' }} \
+                     ${{ github.sha }} | grep -E '^blueprints/.*\.ya?ml$' || true)
+          FILES=${CHANGED:-$(printf 'blueprints/**/*.yaml')}
+          python scripts/ha_blueprint_validate.py $FILES
