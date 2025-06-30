@@ -1,4 +1,4 @@
-# Dynamic Multi-Zone Climate Schedule
+# Dynamic Multi‑Zone Climate Schedule (2025‑06)
 
 This repository provides a Home Assistant blueprint that coordinates a single HVAC head-unit across multiple zones. It selects a global heating, cooling or drying mode based on the most urgent zone and then staggers damper control for each zone.
 
@@ -18,10 +18,9 @@ When creating an automation from the blueprint you will need to provide:
 - **Active Days** – days of the week when the schedule is enabled.
 - **Climate Head-Unit** – the shared climate entity to control.
 - **Temperature & Humidity Thresholds** – values that trigger heating, cooling or dry mode.
-- **Zone Configuration** – choose each zone's damper switch then add one or more
-  temperature and humidity sensors (up to eight zones).
+- **Zone Configuration** – edit the YAML list of zones to specify each zone's damper switch and one or more temperature and/or humidity sensors. Optional overrides let you adjust thresholds per zone. Up to eight zones are supported.
 - **Enable/Override Flags** – input_boolean entities used to enable the schedule and to pause it manually.
-- **Damper Update Delay** – seconds to wait between damper adjustments.
+- **Damper Update Delay** – seconds to wait between zone damper changes.
 - **Hysteresis Values** – optional buffers before heating, cooling or drying engage.
 - **Zone Overrides** – per-zone thresholds and optional area selection.
 
@@ -37,6 +36,8 @@ zones:
     humidity_sensors:
       - sensor.living_room_humidity
     low_temp: 18
+    dry_temp: 20
+    hum_high: 65
   - name: Bedroom
     area: bedroom
     damper_switch: switch.bedroom_damper
