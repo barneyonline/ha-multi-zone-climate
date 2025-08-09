@@ -1,9 +1,9 @@
 blueprint:
-  name: Dynamic Multi‑Zone Climate Schedule (2025‑06)
+  name: Dynamic Multi-Zone Climate Schedule (2025-06)
   description: >
     Computes a single global HVAC mode (heat/cool/dry/off) based on the most
-    urgent zone need, applies it once to a shared climate head‑unit, then
-    staggers per‑zone damper control by urgency. Respects manual overrides and
+    urgent zone need, applies it once to a shared climate head-unit, then
+    staggers per-zone damper control by urgency. Respects manual overrides and
     includes hysteresis.
   domain: automation
   homeassistant:
@@ -68,9 +68,9 @@ blueprint:
         entity:
           domain: input_boolean
 
-    # ───────────── Shared head‑unit ─────────────
+    # ───────────── Shared head-unit ─────────────
     head_unit:
-      name: Climate Head‑Unit
+      name: Climate Head-Unit
       description: The global climate entity to control (e.g. Daikin, Fujitsu)
       selector:
         entity:
@@ -151,7 +151,7 @@ blueprint:
           unit_of_measurement: "%"
 
     dry_temp:
-      name: Dry‑Mode Temperature Threshold
+      name: Dry-Mode Temperature Threshold
       description: Above this + high humidity → dry mode
       default: 22
       selector:
@@ -187,13 +187,13 @@ blueprint:
         Configure up to 8 zones.  For each zone specify:
           – damper_switch       (required)
           – one or more temperature sensors and/or humidity sensors.
-        Optional per‑zone overrides let you tailor temperature
+        Optional per-zone overrides let you tailor temperature
         and humidity thresholds if they differ from the global ones.
         The entry is edited as YAML because the blueprint schema
         does not (yet) support a fully structured form for an array
         of dictionaries.
       default:
-        - name: Zone 1
+        - name: Zone 1
           area: null
           damper_switch: ""
           temp_sensors: []
@@ -215,7 +215,7 @@ trigger:
 
 condition:
   - condition: template
-    value_template: "{{ is_state(!input enabled_flag, 'on') }}"
+    value_template: "{{ is_state(input('enabled_flag'), 'on') }}"
   - condition: state
     entity_id: !input manual_override
     state: "off"
@@ -229,25 +229,24 @@ action:
       zones: !input zones
 
       # Global thresholds & setpoints
-      low:        "{{ float(!input.low_temp) }}"
-      high:       "{{ float(!input.high_temp) }}"
-      dry_t:      "{{ float(!input.dry_temp) }}"
-      hum_h:      "{{ float(!input.hum_high) }}"
-      heat_sp:    "{{ float(!input.heat_set) }}"
-      cool_sp:    "{{ float(!input.cool_set) }}"
-      heat_buf:   "{{ float(!input.heat_hysteresis) }}"
-      cool_buf:   "{{ float(!input.cool_hysteresis) }}"
-      dry_buf:    "{{ float(!input.dry_hysteresis) }}"
-      damper_delay: "{{ int(!input.damper_delay) }}"
+      low:          "{{ input('low_temp') | float }}"
+      high:         "{{ input('high_temp') | float }}"
+      dry_t:        "{{ input('dry_temp') | float }}"
+      hum_h:        "{{ input('hum_high') | float }}"
+      heat_sp:      "{{ input('heat_set') | float }}"
+      cool_sp:      "{{ input('cool_set') | float }}"
+      heat_buf:     "{{ input('heat_hysteresis') | float }}"
+      cool_buf:     "{{ input('cool_hysteresis') | float }}"
+      dry_buf:      "{{ input('dry_hysteresis') | float }}"
+      damper_delay: "{{ input('damper_delay') | int }}"
 
       # ── Gather zone readings & compute urgency ──
-      zone_data: >
+      zone_data: >-
         {% set out = [] %}
         {% for z in zones %}
           {% if not z.damper_switch
-               or (z.temp_sensors | count == 0 and z.humidity_sensors | count == 0) %}
-            {{ log('Skipping zone ' ~ (z.name or z.area or 'unknown') ~
-                    ' because it is missing a damper switch or sensors', 'warning') }}
+                or ((z.temp_sensors | count == 0) and (z.humidity_sensors | count == 0)) %}
+            {# Skip zones that lack a damper or sensors #}
           {% else %}
             {% set temps = z.temp_sensors
                | map('states') | reject('in', ['unknown','unavailable'])
@@ -261,10 +260,10 @@ action:
             {% set hum = (hums | sum) / (hums | length)
                if hums | length > 0 else none %}
 
-            {% set z_low    = (z.low_temp   | default(low))   | float %}
-            {% set z_high   = (z.high_temp  | default(high))  | float %}
-            {% set z_dry_t  = (z.dry_temp   | default(dry_t)) | float %}
-            {% set z_hum_h  = (z.hum_high   | default(hum_h)) | float %}
+            {% set z_low    = (z.low_temp  | default(low))   | float %}
+            {% set z_high   = (z.high_temp | default(high))  | float %}
+            {% set z_dry_t  = (z.dry_temp  | default(dry_t)) | float %}
+            {% set z_hum_h  = (z.hum_high  | default(hum_h)) | float %}
 
             {% set heat_sc = (z_low - temp)
                if (temp is not none and temp < z_low - heat_buf) else 0 %}
@@ -286,22 +285,25 @@ action:
             }) %}
           {% endif %}
         {% endfor %}
-        {{ out | sort(attribute="urgency", reverse=true) }}
+        {{ out | sort(attribute='urgency', reverse=true) }}
 
-      # ── Per‑mode max scores ──
-      scores: >
+      # ── Per-mode max scores ──
+      scores: >-
+        {% set heats = zone_data | map(attribute='heat') | list %}
+        {% set cools = zone_data | map(attribute='cool') | list %}
+        {% set drys  = zone_data | map(attribute='dry')  | list %}
         {{ {
-          "heat": (zone_data | map(attribute="heat") | max(default=0)),
-          "cool": (zone_data | map(attribute="cool") | max(default=0)),
-          "dry":  (zone_data | map(attribute="dry")  | max(default=0))
+          "heat": (heats | default([0]) | max),
+          "cool": (cools | default([0]) | max),
+          "dry":  (drys  | default([0]) | max)
         } }}
 
       # ── Decide global HVAC mode ──
-      mode: >
+      mode: >-
         {% set best = scores | dictsort(attribute=1, reverse=true) | first %}
-        {{ best[0] if best[1] > 0 else 'off' }}
+        {{ best[0] if best and best[1] > 0 else 'off' }}
 
-      set_temp: >
+      set_temp: >-
         {% if mode == 'heat' %}{{ heat_sp }}
         {% elif mode == 'cool' %}{{ cool_sp }}
         {% else %}none{% endif %}
