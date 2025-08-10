@@ -172,7 +172,7 @@ action:
   - variables:
       zones: !input zones
 
-      # Global thresholds & setpoints (assign directly; cast later where needed)
+      # Global thresholds & setpoints (assign raw; cast when used)
       low:          !input low_temp
       high:         !input high_temp
       dry_t:        !input dry_temp
@@ -184,7 +184,7 @@ action:
       dry_buf:      !input dry_hysteresis
       damper_delay: !input damper_delay
 
-      # Per-zone computations
+      # Per-zone computations (defensive casting everywhere)
       zone_data: >-
         {% set out = [] %}
         {% for z in zones %}
@@ -192,26 +192,32 @@ action:
                 or ((z.temp_sensors | count == 0) and (z.humidity_sensors | count == 0)) %}
           {% else %}
             {% set temps = z.temp_sensors
-               | map('states') | reject('in', ['unknown','unavailable'])
-               | map('float') | list %}
+               | map('states')
+               | reject('in', ['unknown','unavailable','none','None','null'])
+               | map('float', 0) | list %}
             {% set temp = (temps | sum) / (temps | length) if temps | length > 0 else none %}
 
             {% set hums = z.humidity_sensors
-               | map('states') | reject('in', ['unknown','unavailable'])
-               | map('float') | list %}
+               | map('states')
+               | reject('in', ['unknown','unavailable','none','None','null'])
+               | map('float', 0) | list %}
             {% set hum = (hums | sum) / (hums | length) if hums | length > 0 else none %}
 
-            {% set z_low    = (z.low_temp  | default(low))   | float %}
-            {% set z_high   = (z.high_temp | default(high))  | float %}
-            {% set z_dry_t  = (z.dry_temp  | default(dry_t)) | float %}
-            {% set z_hum_h  = (z.hum_high  | default(hum_h)) | float %}
+            {% set z_low    = (z.low_temp  | default(low))   | float(low) %}
+            {% set z_high   = (z.high_temp | default(high))  | float(high) %}
+            {% set z_dry_t  = (z.dry_temp  | default(dry_t)) | float(dry_t) %}
+            {% set z_hum_h  = (z.hum_high  | default(hum_h)) | float(hum_h) %}
+
+            {% set hbuf = (heat_buf | float(0)) %}
+            {% set cbuf = (cool_buf | float(0)) %}
+            {% set dbuf = (dry_buf  | float(0)) %}
 
             {% set heat_sc = (z_low - temp)
-               if (temp is not none and temp < z_low - (heat_buf | float)) else 0 %}
+               if (temp is not none and temp < z_low - hbuf) else 0 %}
             {% set cool_sc = (temp - z_high)
-               if (temp is not none and temp > z_high + (cool_buf | float)) else 0 %}
+               if (temp is not none and temp > z_high + cbuf) else 0 %}
             {% set dry_sc  = (hum - z_hum_h)
-               if (hum  is not none and hum  > z_hum_h + (dry_buf | float)
+               if (hum  is not none and hum  > z_hum_h + dbuf
                    and temp is not none and temp > z_dry_t) else 0 %}
             {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
 
@@ -243,8 +249,8 @@ action:
         {{ best[0] if best and best[1] > 0 else 'off' }}
 
       set_temp: >-
-        {% if mode == 'heat' %}{{ heat_sp | float }}
-        {% elif mode == 'cool' %}{{ cool_sp | float }}
+        {% if mode == 'heat' %}{{ heat_sp | float(low) }}
+        {% elif mode == 'cool' %}{{ cool_sp | float(high) }}
         {% else %}none{% endif %}
 
   # 1) Set global HVAC mode
@@ -268,7 +274,8 @@ action:
   - repeat:
       for_each: "{{ zone_data }}"
       sequence:
-        - delay: "00:00:{{ damper_delay }}"
+        - delay:
+            seconds: "{{ damper_delay | int }}"
         - choose:
             - conditions: "{{ repeat.item.urgency > 0 }}"
               sequence:
