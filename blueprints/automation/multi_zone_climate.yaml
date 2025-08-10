@@ -184,13 +184,12 @@ action:
       dry_buf:      !input dry_hysteresis
       damper_delay: !input damper_delay
 
-      # Per-zone computations (defensive casting everywhere)
+      # Per-zone computations (no method calls; defensive casting)
       zone_data: >-
         {% set out = [] %}
         {% for z in zones %}
-          {% if not z.damper_switch
-                or ((z.temp_sensors | count == 0) and (z.humidity_sensors | count == 0)) %}
-          {% else %}
+          {% set has_sensors = (z.temp_sensors | count > 0) or (z.humidity_sensors | count > 0) %}
+          {% if z.damper_switch and has_sensors %}
             {% set temps = z.temp_sensors
                | map('states')
                | reject('in', ['unknown','unavailable','none','None','null'])
@@ -221,7 +220,7 @@ action:
                    and temp is not none and temp > z_dry_t) else 0 %}
             {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
 
-            {% set _ = out.append({
+            {% set out = out + [{
               "switch":   z.damper_switch,
               "temp":     temp,
               "hum":      hum,
@@ -229,7 +228,7 @@ action:
               "cool":     cool_sc,
               "dry":      dry_sc,
               "urgency":  urg
-            }) %}
+            }] %}
           {% endif %}
         {% endfor %}
         {{ out | sort(attribute='urgency', reverse=true) }}
