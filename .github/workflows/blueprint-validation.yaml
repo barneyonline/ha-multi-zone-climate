@@ -13,20 +13,19 @@ on:
 jobs:
   blueprint-check:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'   # >= 3.13.2 for HA 2025.6+
 
-      # Install Home Assistant Core (no extras)
       - name: Install Home Assistant Core
         run: |
+          python --version
+          pip install --upgrade pip
           pip install "homeassistant==2025.6.0"
 
-      # Validate all blueprints touched in the PR (or all on push)
       - name: Validate blueprints
         run: |
           CHANGED=$(git diff --name-only \
