@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # avoid HEAD~1 issues if you later diff
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -24,8 +24,25 @@ jobs:
           python --version
           pip install --upgrade pip
           pip install "homeassistant==2025.6.0"
-          python -c "import homeassistant, sys; print('HA OK', homeassistant.__version__, sys.version)"
+          python - <<'PY'
+from importlib.metadata import version
+import sys
+print("HA OK", version("homeassistant"), sys.version)
+PY
+
+      - name: Determine files to validate
+        id: files
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            CHANGED=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" \
+                      | grep -E '^blueprints/.*\.ya?ml$' || true)
+            echo "files=${CHANGED}" >> "$GITHUB_OUTPUT"
+          else
+            echo "files=blueprints/**/*.yaml" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Validate blueprints
         run: |
-          python scripts/ha_blueprint_validate.py blueprints/**/*.yaml
+          FILES="${{ steps.files.outputs.files }}"
+          python scripts/ha_blueprint_validate.py ${FILES:-blueprints/**/*.yaml}
