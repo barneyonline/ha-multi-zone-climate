@@ -172,17 +172,17 @@ action:
   - variables:
       zones: !input zones
 
-      # Global thresholds & setpoints
-      low:          "{{ input('low_temp') | float }}"
-      high:         "{{ input('high_temp') | float }}"
-      dry_t:        "{{ input('dry_temp') | float }}"
-      hum_h:        "{{ input('hum_high') | float }}"
-      heat_sp:      "{{ input('heat_set') | float }}"
-      cool_sp:      "{{ input('cool_set') | float }}"
-      heat_buf:     "{{ input('heat_hysteresis') | float }}"
-      cool_buf:     "{{ input('cool_hysteresis') | float }}"
-      dry_buf:      "{{ input('dry_hysteresis') | float }}"
-      damper_delay: "{{ input('damper_delay') | int }}"
+      # Global thresholds & setpoints (assign directly; cast later where needed)
+      low:          !input low_temp
+      high:         !input high_temp
+      dry_t:        !input dry_temp
+      hum_h:        !input hum_high
+      heat_sp:      !input heat_set
+      cool_sp:      !input cool_set
+      heat_buf:     !input heat_hysteresis
+      cool_buf:     !input cool_hysteresis
+      dry_buf:      !input dry_hysteresis
+      damper_delay: !input damper_delay
 
       # Per-zone computations
       zone_data: >-
@@ -207,11 +207,11 @@ action:
             {% set z_hum_h  = (z.hum_high  | default(hum_h)) | float %}
 
             {% set heat_sc = (z_low - temp)
-               if (temp is not none and temp < z_low - heat_buf) else 0 %}
+               if (temp is not none and temp < z_low - (heat_buf | float)) else 0 %}
             {% set cool_sc = (temp - z_high)
-               if (temp is not none and temp > z_high + cool_buf) else 0 %}
+               if (temp is not none and temp > z_high + (cool_buf | float)) else 0 %}
             {% set dry_sc  = (hum - z_hum_h)
-               if (hum  is not none and hum  > z_hum_h + dry_buf
+               if (hum  is not none and hum  > z_hum_h + (dry_buf | float)
                    and temp is not none and temp > z_dry_t) else 0 %}
             {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
 
@@ -243,8 +243,8 @@ action:
         {{ best[0] if best and best[1] > 0 else 'off' }}
 
       set_temp: >-
-        {% if mode == 'heat' %}{{ heat_sp }}
-        {% elif mode == 'cool' %}{{ cool_sp }}
+        {% if mode == 'heat' %}{{ heat_sp | float }}
+        {% elif mode == 'cool' %}{{ cool_sp | float }}
         {% else %}none{% endif %}
 
   # 1) Set global HVAC mode
