@@ -4,11 +4,11 @@ This repository provides a Home Assistant blueprint that coordinates a single HV
 
 ## Importing the Blueprint
 
-[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fbarneyonline%2Fha-multi-zone-climate%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmulti_zone_climate.yaml)
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Fbarneyonline%2Fha-multi-zone-climate%2Fmain%2Fblueprints%2Fautomation%2Fmulti_zone_climate.yaml)
 
-This blueprint uses object selectors with `multiple` and `fields`. These require
-**Home Assistant 2025.6** or newer. Ensure your instance is updated before
-importing.
+Works with current Home Assistant releases. No bleeding‑edge features are
+required; if you previously saw an import error, update to a recent HA version
+and use the raw blueprint URL above.
 
 ## Configuration
 
@@ -21,6 +21,7 @@ When creating an automation from the blueprint you will need to provide:
 - **Zone Configuration** – edit the YAML list of zones to specify each zone's damper switch and one or more temperature and/or humidity sensors. Optional overrides let you adjust thresholds per zone. Up to eight zones are supported.
 - **Enable/Override Flags** – input_boolean entities used to enable the schedule and to pause it manually.
 - **Damper Update Delay** – seconds to wait between zone damper changes.
+- **Update Interval** – how often the blueprint re-evaluates all zones (15s, 30s, 1m, 5m).
 - **Hysteresis Values** – optional buffers before heating, cooling or drying engage.
 - **Zone Overrides** – per-zone thresholds and optional area selection.
 
