@@ -6,8 +6,9 @@ blueprint:
     staggers per-zone damper control by urgency. Respects manual overrides and
     includes hysteresis. Optionally gates on selected person entities being home.
   domain: automation
-  homeassistant:
-    min_version: "2025.6.0"
+  # Avoid gating import on very new releases; keep broad compatibility
+  # homeassistant:
+  #   min_version: "2025.6.0"
   source_url: https://github.com/barneyonline/ha-multi-zone-climate/blob/main/blueprints/automation/multi_zone_climate.yaml
 
   input:
@@ -104,6 +105,18 @@ blueprint:
       default: 10
       selector: { number: { min: 0, max: 60, unit_of_measurement: "s" } }
 
+    update_interval:
+      name: Update Interval
+      description: How often to re-evaluate zones and update head unit/dampers.
+      default: 1m
+      selector:
+        select:
+          options:
+            - { label: Every 15 seconds, value: 15s }
+            - { label: Every 30 seconds, value: 30s }
+            - { label: Every 1 minute,  value: 1m }
+            - { label: Every 5 minutes, value: 5m }
+
     zones:
       name: Zones Configuration
       description: |
@@ -126,15 +139,31 @@ blueprint:
 variables:
   persons: !input persons
 
-trigger:
-  - platform: time
-    at: !input start_time
-  - platform: time
-    at: !input end_time
-  - platform: state
-    entity_id: !input head_unit
+trigger_variables:
+  _interval: !input update_interval
 
-condition:
+triggers:
+  - trigger: time
+    at: !input start_time
+  - trigger: time
+    at: !input end_time
+  - trigger: state
+    entity_id: !input head_unit
+  # Recalculate regularly so zone dampers/head unit respond to sensor changes
+  - trigger: time_pattern
+    seconds: "/15"
+    enabled: "{{ _interval == '15s' }}"
+  - trigger: time_pattern
+    seconds: "/30"
+    enabled: "{{ _interval == '30s' }}"
+  - trigger: time_pattern
+    minutes: "/1"
+    enabled: "{{ _interval == '1m' }}"
+  - trigger: time_pattern
+    minutes: "/5"
+    enabled: "{{ _interval == '5m' }}"
+
+conditions:
   - condition: template
     value_template: >-
       {% if persons | length > 0 %}
@@ -154,7 +183,7 @@ condition:
     before: !input end_time
     weekday: !input days
 
-action:
+actions:
   - variables:
       zones:        !input zones
       low:          !input low_temp
@@ -235,7 +264,7 @@ action:
         {% elif mode == 'cool' %}{{ cool_sp | float(high) }}
         {% else %}none{% endif %}
 
-  - service: climate.set_hvac_mode
+  - action: climate.set_hvac_mode
     target:
       entity_id: !input head_unit
     data:
@@ -244,7 +273,7 @@ action:
   - choose:
       - conditions: "{{ mode in ['heat', 'cool'] }}"
         sequence:
-          - service: climate.set_temperature
+          - action: climate.set_temperature
             target:
               entity_id: !input head_unit
             data:
@@ -258,11 +287,11 @@ action:
         - choose:
             - conditions: "{{ repeat.item.urgency > 0 }}"
               sequence:
-                - service: switch.turn_on
+                - action: switch.turn_on
                   target:
                     entity_id: "{{ repeat.item.switch }}"
           default:
-            - service: switch.turn_off
+            - action: switch.turn_off
               target:
                 entity_id: "{{ repeat.item.switch }}"
 
