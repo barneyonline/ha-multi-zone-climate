@@ -200,19 +200,23 @@ actions:
       zone_data: >-
         {% set ns = namespace(out=[]) %}
         {% for z in zones %}
-          {% set has_sensors = (z.temp_sensors | count > 0) or (z.humidity_sensors | count > 0) %}
-          {% if z.damper_switch and has_sensors %}
-            {% set temps = z.temp_sensors
-               | map('states')
-               | reject('in', ['unknown','unavailable','none','None','null'])
-               | map('float') | list %}
-            {% set temp = (temps | sum) / (temps | length) if temps | length > 0 else none %}
+          {# Normalize sensors: allow single entity_id or list #}
+          {% set t_ents = z.temp_sensors if (z.temp_sensors is list or z.temp_sensors is tuple) else ([z.temp_sensors] if (z.temp_sensors is defined and z.temp_sensors is not none and z.temp_sensors != '') else []) %}
+          {% set h_ents = z.humidity_sensors if (z.humidity_sensors is list or z.humidity_sensors is tuple) else ([z.humidity_sensors] if (z.humidity_sensors is defined and z.humidity_sensors is not none and z.humidity_sensors != '') else []) %}
 
-            {% set hums = z.humidity_sensors
-               | map('states')
+          {% set has_sensors = (t_ents | length > 0) or (h_ents | length > 0) %}
+          {% if z.damper_switch and has_sensors %}
+            {% set t_vals = expand(t_ents)
+               | map(attribute='state')
                | reject('in', ['unknown','unavailable','none','None','null'])
                | map('float') | list %}
-            {% set hum = (hums | sum) / (hums | length) if hums | length > 0 else none %}
+            {% set h_vals = expand(h_ents)
+               | map(attribute='state')
+               | reject('in', ['unknown','unavailable','none','None','null'])
+               | map('float') | list %}
+
+            {% set temp = (t_vals | average(default=none)) %}
+            {% set hum  = (h_vals | average(default=none)) %}
 
             {% set z_low    = (z.low_temp  | default(low,  true)) | float %}
             {% set z_high   = (z.high_temp | default(high, true)) | float %}
@@ -233,13 +237,13 @@ actions:
             {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
 
             {% set ns.out = ns.out + [{
-              "switch":   z.damper_switch,
-              "temp":     temp,
-              "hum":      hum,
-              "heat":     heat_sc,
-              "cool":     cool_sc,
-              "dry":      dry_sc,
-              "urgency":  urg
+              'switch':   z.damper_switch,
+              'temp':     temp,
+              'hum':      hum,
+              'heat':     heat_sc,
+              'cool':     cool_sc,
+              'dry':      dry_sc,
+              'urgency':  urg
             }] %}
           {% endif %}
         {% endfor %}
@@ -256,7 +260,7 @@ actions:
         } }}
 
       mode: >-
-        {% set best = scores | dictsort(attribute=1, reverse=true) | first %}
+        {% set best = scores | dictsort(by='value', reverse=true) | first %}
         {{ best[0] if best and best[1] > 0 else 'off' }}
 
       set_temp: >-
