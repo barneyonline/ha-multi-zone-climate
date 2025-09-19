@@ -17,6 +17,7 @@ When creating an automation from the blueprint you will need to provide:
 - **Schedule Start/End Times** – the daily window during which the system operates.
 - **Active Days** – days of the week when the schedule is enabled.
 - **Climate Head-Unit** – the shared climate entity to control.
+- **Temperature Sync Script** – optional script triggered whenever the blueprint updates the head-unit setpoint.
 - **Temperature & Humidity Thresholds** – values that trigger heating, cooling or dry mode.
 - **Mode Toggles** – switches to enable or disable heating, cooling or dry mode as well as head-unit and damper control.
 - **Zone Configuration** – edit the YAML list of zones to specify each zone's damper switch and one or more temperature and/or humidity sensors. Optional overrides let you adjust thresholds per zone. Up to eight zones are supported.
