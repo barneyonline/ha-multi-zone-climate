@@ -117,6 +117,14 @@ blueprint:
             - { label: Every 1 minute,  value: 1m }
             - { label: Every 5 minutes, value: 5m }
 
+    temperature_sync_script:
+      name: Temperature Sync Script
+      description: Optional script to run after updating the head-unit setpoint. Leave empty to disable.
+      default: null
+      selector:
+        entity:
+          domain: script
+
     zones:
       name: Zones Configuration
       description: |
@@ -196,6 +204,7 @@ actions:
       cool_buf:     !input cool_hysteresis
       dry_buf:      !input dry_hysteresis
       damper_delay: !input damper_delay
+      sync_script:  !input temperature_sync_script
 
       zone_data: >-
         {% set ns = namespace(out=[]) %}
@@ -282,6 +291,12 @@ actions:
               entity_id: !input head_unit
             data:
               temperature: "{{ set_temp }}"
+          - choose:
+              - conditions: "{{ sync_script is defined and sync_script not in [none, '', []] }}"
+                sequence:
+                  - action: script.turn_on
+                    target:
+                      entity_id: "{{ sync_script }}"
 
   - repeat:
       for_each: "{{ zone_data }}"
