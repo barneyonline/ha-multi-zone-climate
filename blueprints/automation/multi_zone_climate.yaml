@@ -87,23 +87,59 @@ blueprint:
 
     low_temp:
       name: Low Temperature Threshold
+      description: Manual fallback used when no input_number override is selected below.
       default: 19
       selector: { number: { min: 5, max: 30, unit_of_measurement: "°C" } }
 
+    low_temp_input:
+      name: Low Temperature Threshold Input Number (optional)
+      description: If provided, overrides the Low Temperature Threshold number selector.
+      default: ""
+      selector:
+        entity:
+          domain: input_number
+
     heat_set:
       name: Heat Setpoint
+      description: Manual fallback used when no input_number override is selected below.
       default: 21
       selector: { number: { min: 10, max: 30, unit_of_measurement: "°C" } }
 
+    heat_set_input:
+      name: Heat Setpoint Input Number (optional)
+      description: If provided, overrides the Heat Setpoint number selector.
+      default: ""
+      selector:
+        entity:
+          domain: input_number
+
     high_temp:
       name: High Temperature Threshold
+      description: Manual fallback used when no input_number override is selected below.
       default: 24
       selector: { number: { min: 15, max: 35, unit_of_measurement: "°C" } }
 
+    high_temp_input:
+      name: High Temperature Threshold Input Number (optional)
+      description: If provided, overrides the High Temperature Threshold number selector.
+      default: ""
+      selector:
+        entity:
+          domain: input_number
+
     cool_set:
       name: Cool Setpoint
+      description: Manual fallback used when no input_number override is selected below.
       default: 23
       selector: { number: { min: 15, max: 35, unit_of_measurement: "°C" } }
+
+    cool_set_input:
+      name: Cool Setpoint Input Number (optional)
+      description: If provided, overrides the Cool Setpoint number selector.
+      default: ""
+      selector:
+        entity:
+          domain: input_number
 
     heat_hysteresis:
       name: Heat Hysteresis
@@ -122,13 +158,31 @@ blueprint:
 
     dry_temp:
       name: Dry-Mode Temperature Threshold
+      description: Manual fallback used when no input_number override is selected below.
       default: 22
       selector: { number: { min: 5, max: 30, unit_of_measurement: "°C" } }
 
+    dry_temp_input:
+      name: Dry-Mode Temperature Threshold Input Number (optional)
+      description: If provided, overrides the Dry-Mode Temperature Threshold number selector.
+      default: ""
+      selector:
+        entity:
+          domain: input_number
+
     hum_high:
       name: High Humidity Threshold
+      description: Manual fallback used when no input_number override is selected below.
       default: 60
       selector: { number: { min: 20, max: 100, unit_of_measurement: "%" } }
+
+    hum_high_input:
+      name: High Humidity Threshold Input Number (optional)
+      description: If provided, overrides the High Humidity Threshold number selector.
+      default: ""
+      selector:
+        entity:
+          domain: input_number
 
     damper_delay:
       name: Damper Update Delay
@@ -226,12 +280,73 @@ conditions:
 actions:
   - variables:
       zones:        !input zones
-      low:          !input low_temp
-      high:         !input high_temp
-      dry_t:        !input dry_temp
-      hum_h:        !input hum_high
-      heat_sp:      !input heat_set
-      cool_sp:      !input cool_set
+
+      low_static:   !input low_temp
+      low_entity:   !input low_temp_input
+      low: >-
+        {% set entity = low_entity %}
+        {% set fallback = low_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      high_static:  !input high_temp
+      high_entity:  !input high_temp_input
+      high: >-
+        {% set entity = high_entity %}
+        {% set fallback = high_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      dry_static:   !input dry_temp
+      dry_entity:   !input dry_temp_input
+      dry_t: >-
+        {% set entity = dry_entity %}
+        {% set fallback = dry_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      hum_static:   !input hum_high
+      hum_entity:   !input hum_high_input
+      hum_h: >-
+        {% set entity = hum_entity %}
+        {% set fallback = hum_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      heat_sp_static: !input heat_set
+      heat_sp_entity: !input heat_set_input
+      heat_sp: >-
+        {% set entity = heat_sp_entity %}
+        {% set fallback = heat_sp_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      cool_sp_static: !input cool_set
+      cool_sp_entity: !input cool_set_input
+      cool_sp: >-
+        {% set entity = cool_sp_entity %}
+        {% set fallback = cool_sp_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
       heat_buf:     !input heat_hysteresis
       cool_buf:     !input cool_hysteresis
       dry_buf:      !input dry_hysteresis
