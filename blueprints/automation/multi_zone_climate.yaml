@@ -97,7 +97,8 @@ blueprint:
       default: ""
       selector:
         entity:
-          domain: input_number
+          filter:
+            - domain: input_number
 
     heat_set:
       name: Heat Setpoint
@@ -111,7 +112,8 @@ blueprint:
       default: ""
       selector:
         entity:
-          domain: input_number
+          filter:
+            - domain: input_number
 
     high_temp:
       name: High Temperature Threshold
@@ -125,7 +127,8 @@ blueprint:
       default: ""
       selector:
         entity:
-          domain: input_number
+          filter:
+            - domain: input_number
 
     cool_set:
       name: Cool Setpoint
@@ -139,7 +142,8 @@ blueprint:
       default: ""
       selector:
         entity:
-          domain: input_number
+          filter:
+            - domain: input_number
 
     heat_hysteresis:
       name: Heat Hysteresis
@@ -168,7 +172,8 @@ blueprint:
       default: ""
       selector:
         entity:
-          domain: input_number
+          filter:
+            - domain: input_number
 
     hum_high:
       name: High Humidity Threshold
@@ -182,7 +187,8 @@ blueprint:
       default: ""
       selector:
         entity:
-          domain: input_number
+          filter:
+            - domain: input_number
 
     damper_delay:
       name: Damper Update Delay
