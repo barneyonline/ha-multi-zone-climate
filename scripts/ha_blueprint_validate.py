@@ -7,13 +7,50 @@ Example:
     python ha_blueprint_validate.py blueprints/**/*.yaml
 """
 import asyncio
+import inspect
 import sys
 from pathlib import Path
+from types import ModuleType
+
+
+def _ensure_stub_notifications() -> None:
+    """Provide a minimal persistent_notification stub when running standalone."""
+
+    module_name = "homeassistant.components.persistent_notification"
+    if module_name in sys.modules:
+        return
+
+    stub = ModuleType(module_name)
+
+    async def _noop_async(*_args, **_kwargs):
+        return None
+
+    def _noop_sync(*_args, **_kwargs):
+        return None
+
+    stub.async_create = _noop_async
+    stub.async_dismiss = _noop_async
+    stub.create = _noop_sync
+    stub.dismiss = _noop_sync
+    sys.modules[module_name] = stub
+
+
+_ensure_stub_notifications()
 
 from homeassistant.components.blueprint.errors import BlueprintException
 from homeassistant.components.blueprint.models import Blueprint
-from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
+
+try:
+    from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
+except ImportError:  # pragma: no cover - older HA may lack schemas module
+    BLUEPRINT_SCHEMA = None
+
 from homeassistant.util import yaml as yaml_util
+
+_SUPPORTS_SCHEMA = any(
+    param.kind == inspect.Parameter.KEYWORD_ONLY and param.name == "schema"
+    for param in inspect.signature(Blueprint.__init__).parameters.values()
+)
 
 
 async def validate_one(path: Path) -> bool:
@@ -22,7 +59,10 @@ async def validate_one(path: Path) -> bool:
         # Parse YAML (supports Home Assistant tags like !input)
         data = yaml_util.load_yaml(path)
         # Validate against the official blueprint schema
-        Blueprint(data, path=str(path), schema=BLUEPRINT_SCHEMA)
+        kwargs: dict[str, object] = {"path": str(path)}
+        if _SUPPORTS_SCHEMA and BLUEPRINT_SCHEMA is not None:
+            kwargs["schema"] = BLUEPRINT_SCHEMA
+        Blueprint(data, **kwargs)
         print(f"✅ {path} — valid")
         return True
     except BlueprintException as err:
