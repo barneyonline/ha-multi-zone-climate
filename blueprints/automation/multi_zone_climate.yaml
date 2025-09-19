@@ -87,52 +87,56 @@ blueprint:
 
     low_temp:
       name: Low Temperature Threshold
+      description: Manual fallback used when no input_number override is selected below.
       default: 19
       selector: { number: { min: 5, max: 30, unit_of_measurement: "°C" } }
 
     low_temp_input:
       name: Low Temperature Threshold Input Number (optional)
       description: If provided, overrides the Low Temperature Threshold number selector.
-      default: null
+      default: ""
       selector:
         entity:
           domain: input_number
 
     heat_set:
       name: Heat Setpoint
+      description: Manual fallback used when no input_number override is selected below.
       default: 21
       selector: { number: { min: 10, max: 30, unit_of_measurement: "°C" } }
 
     heat_set_input:
       name: Heat Setpoint Input Number (optional)
       description: If provided, overrides the Heat Setpoint number selector.
-      default: null
+      default: ""
       selector:
         entity:
           domain: input_number
 
     high_temp:
       name: High Temperature Threshold
+      description: Manual fallback used when no input_number override is selected below.
       default: 24
       selector: { number: { min: 15, max: 35, unit_of_measurement: "°C" } }
 
     high_temp_input:
       name: High Temperature Threshold Input Number (optional)
       description: If provided, overrides the High Temperature Threshold number selector.
-      default: null
+      default: ""
       selector:
         entity:
           domain: input_number
 
     cool_set:
       name: Cool Setpoint
+      description: Manual fallback used when no input_number override is selected below.
       default: 23
       selector: { number: { min: 15, max: 35, unit_of_measurement: "°C" } }
 
     cool_set_input:
       name: Cool Setpoint Input Number (optional)
       description: If provided, overrides the Cool Setpoint number selector.
-      default: null
+      default: ""
       selector:
         entity:
           domain: input_number
@@ -154,26 +158,28 @@ blueprint:
 
     dry_temp:
       name: Dry-Mode Temperature Threshold
+      description: Manual fallback used when no input_number override is selected below.
       default: 22
       selector: { number: { min: 5, max: 30, unit_of_measurement: "°C" } }
 
     dry_temp_input:
       name: Dry-Mode Temperature Threshold Input Number (optional)
       description: If provided, overrides the Dry-Mode Temperature Threshold number selector.
-      default: null
+      default: ""
       selector:
         entity:
           domain: input_number
 
     hum_high:
       name: High Humidity Threshold
+      description: Manual fallback used when no input_number override is selected below.
       default: 60
       selector: { number: { min: 20, max: 100, unit_of_measurement: "%" } }
 
     hum_high_input:
       name: High Humidity Threshold Input Number (optional)
       description: If provided, overrides the High Humidity Threshold number selector.
-      default: null
+      default: ""
       selector:
         entity:
           domain: input_number
