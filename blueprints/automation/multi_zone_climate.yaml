@@ -416,12 +416,23 @@ actions:
                   {% set cbuf = cool_buf | float(0) %}
                   {% set dbuf = dry_buf  | float(0) %}
 
-                  {% set heat_needed = allow_heat and temp is not none and temp < z_low + hbuf %}
-                  {% set heat_sc = (z_low + hbuf - temp)
-                     if heat_needed else 0 %}
+                  {% set band = z_high - z_low %}
+                  {% if band < 0 %}{% set band = 0 %}{% endif %}
+                  {% set total_buf = hbuf + cbuf %}
+                  {% if total_buf > band and total_buf > 0 %}
+                    {% set scale = band / total_buf %}
+                    {% set hbuf = hbuf * scale %}
+                    {% set cbuf = cbuf * scale %}
+                  {% endif %}
+
+                  {% set heat_thresh = z_low + hbuf %}
                   {% set cool_thresh = z_high - cbuf %}
+                  {% set heat_needed = allow_heat and temp is not none and temp < heat_thresh %}
+                  {% set heat_sc = (heat_thresh - temp)
+                     if heat_needed else 0 %}
+                  {% set cool_needed = allow_cool and temp is not none and temp > cool_thresh %}
                   {% set cool_sc = (temp - cool_thresh)
-                     if (allow_cool and temp is not none and temp > cool_thresh) else 0 %}
+                     if cool_needed else 0 %}
                   {% set dry_sc  = (hum - (z_hum_h + dbuf))
                      if (allow_dry and hum  is not none and hum  > z_hum_h + dbuf and temp is not none and temp > z_dry_t) else 0 %}
                   {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
