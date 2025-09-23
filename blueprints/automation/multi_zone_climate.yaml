@@ -247,8 +247,6 @@ triggers:
     at: !input start_time
   - trigger: time
     at: !input end_time
-  - trigger: state
-    entity_id: !input head_unit
   # Recalculate regularly so zone dampers/head unit respond to sensor changes
   - trigger: time_pattern
     seconds: "/15"
@@ -363,6 +361,7 @@ actions:
           heat_buf:     !input heat_hysteresis
           cool_buf:     !input cool_hysteresis
           dry_buf:      !input dry_hysteresis
+          head_entity:  !input head_unit
           damper_delay: !input damper_delay
           allow_heat:   !input allow_heat
           allow_cool:   !input allow_cool
@@ -417,11 +416,13 @@ actions:
                   {% set cbuf = cool_buf | float(0) %}
                   {% set dbuf = dry_buf  | float(0) %}
 
-                  {% set heat_sc = (z_low - temp)
-                     if (allow_heat and temp is not none and temp < z_low - hbuf) else 0 %}
-                  {% set cool_sc = (temp - z_high)
-                     if (allow_cool and temp is not none and temp > z_high + cbuf) else 0 %}
-                  {% set dry_sc  = (hum - z_hum_h)
+                  {% set heat_needed = allow_heat and temp is not none and temp < z_low + hbuf %}
+                  {% set heat_sc = (z_low + hbuf - temp)
+                     if heat_needed else 0 %}
+                  {% set cool_thresh = z_high - cbuf %}
+                  {% set cool_sc = (temp - cool_thresh)
+                     if (allow_cool and temp is not none and temp > cool_thresh) else 0 %}
+                  {% set dry_sc  = (hum - (z_hum_h + dbuf))
                      if (allow_dry and hum  is not none and hum  > z_hum_h + dbuf and temp is not none and temp > z_dry_t) else 0 %}
                   {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
 
@@ -460,16 +461,47 @@ actions:
             {% elif mode == 'cool' %}{{ cool_sp | float(high) }}
             {% else %}none{% endif %}
 
+          current_hvac_mode: >-
+            {% if head_entity in [none, '', []] %}
+              none
+            {% else %}
+              {{ states(head_entity) }}
+            {% endif %}
+
+          needs_mode_update: >-
+            {% if mode in [none, '', []] %}
+              false
+            {% else %}
+              {{ current_hvac_mode != mode }}
+            {% endif %}
+
+          needs_temp_update: >-
+            {% if mode not in ['heat', 'cool'] %}
+              false
+            {% elif set_temp in [none, '', []] %}
+              false
+            {% else %}
+              {% set current = state_attr(head_entity, 'temperature') %}
+              {% if current in [none, '', 'unknown', 'unavailable'] %}
+                true
+              {% else %}
+                {{ (set_temp | float) | round(2) != (current | float) | round(2) }}
+              {% endif %}
+            {% endif %}
+
       - choose:
           - conditions: "{{ control_head }}"
             sequence:
-              - action: climate.set_hvac_mode
-                target:
-                  entity_id: !input head_unit
-                data:
-                  hvac_mode: "{{ mode }}"
               - choose:
-                  - conditions: "{{ mode in ['heat', 'cool'] }}"
+                  - conditions: "{{ needs_mode_update }}"
+                    sequence:
+                      - action: climate.set_hvac_mode
+                        target:
+                          entity_id: !input head_unit
+                        data:
+                          hvac_mode: "{{ mode }}"
+              - choose:
+                  - conditions: "{{ mode in ['heat', 'cool'] and needs_temp_update }}"
                     sequence:
                       - action: climate.set_temperature
                         target:
