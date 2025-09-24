@@ -527,7 +527,7 @@ actions:
                                   entity_id: "{{ sync_script }}"
 
       - choose:
-          - conditions: "{{ control_dampers }}"
+          - conditions: "{{ control_dampers and mode != 'off' }}"
             sequence:
               - repeat:
                   for_each: "{{ zone_data }}"
