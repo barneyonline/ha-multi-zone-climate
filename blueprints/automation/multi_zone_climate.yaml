@@ -202,10 +202,10 @@ blueprint:
       selector:
         select:
           options:
-            - { label: Every 15 seconds, value: 15s }
-            - { label: Every 30 seconds, value: 30s }
             - { label: Every 1 minute,  value: 1m }
             - { label: Every 5 minutes, value: 5m }
+            - { label: Every 10 minutes, value: 10m }
+            - { label: Every 15 minutes, value: 15m }
 
     temperature_sync_script:
       name: Temperature Sync Script
@@ -249,17 +249,17 @@ triggers:
     at: !input end_time
   # Recalculate regularly so zone dampers/head unit respond to sensor changes
   - trigger: time_pattern
-    seconds: "/15"
-    enabled: "{{ _interval == '15s' }}"
-  - trigger: time_pattern
-    seconds: "/30"
-    enabled: "{{ _interval == '30s' }}"
-  - trigger: time_pattern
     minutes: "/1"
     enabled: "{{ _interval == '1m' }}"
   - trigger: time_pattern
     minutes: "/5"
     enabled: "{{ _interval == '5m' }}"
+  - trigger: time_pattern
+    minutes: "/10"
+    enabled: "{{ _interval == '10m' }}"
+  - trigger: time_pattern
+    minutes: "/15"
+    enabled: "{{ _interval == '15m' }}"
 
 conditions:
   - condition: template
