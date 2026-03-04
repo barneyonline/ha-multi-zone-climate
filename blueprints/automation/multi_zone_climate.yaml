@@ -3,8 +3,10 @@ blueprint:
   description: >
     Computes a single global HVAC mode (heat/cool/dry/off) based on the most
     urgent zone need, applies it once to a shared climate head-unit, then
-    staggers per-zone damper control by urgency. Respects manual overrides and
-    includes hysteresis. Optionally gates on selected person entities being home.
+    staggers per-zone damper control by urgency. Optionally mirrors the target
+    set temperature to additional per-zone climate entities. Respects manual
+    overrides and includes hysteresis. Optionally gates on selected person
+    entities being home.
   domain: automation
   # Avoid gating import on very new releases; keep broad compatibility
   # homeassistant:
@@ -207,13 +209,14 @@ blueprint:
             - { label: Every 10 minutes, value: 10m }
             - { label: Every 15 minutes, value: 15m }
 
-    temperature_sync_script:
-      name: Temperature Sync Script
-      description: Optional script to run after updating the head-unit setpoint. Leave empty to disable.
-      default: null
+    zone_temperature_entities:
+      name: Zone Temperature Climate Entities (optional)
+      description: Additional climate entities to keep aligned with the head-unit target temperature.
+      default: []
       selector:
         entity:
-          domain: script
+          domain: climate
+          multiple: true
 
     zones:
       name: Zones Configuration
@@ -368,7 +371,7 @@ actions:
           allow_dry:    !input allow_dry
           control_head:    !input control_head_unit
           control_dampers: !input control_dampers
-          sync_script:  !input temperature_sync_script
+          zone_temp_entities: !input zone_temperature_entities
 
           zone_data: >-
             {% set ns = namespace(out=[]) %}
@@ -472,6 +475,19 @@ actions:
             {% elif mode == 'cool' %}{{ cool_sp | float(high) }}
             {% else %}none{% endif %}
 
+          temp_targets: >-
+            {% set ns = namespace(ids=[]) %}
+            {% if head_entity not in [none, '', []] %}
+              {% set ns.ids = ns.ids + [head_entity] %}
+            {% endif %}
+            {% set extras = zone_temp_entities if (zone_temp_entities is list or zone_temp_entities is tuple) else ([zone_temp_entities] if zone_temp_entities not in [none, '', []] else []) %}
+            {% for entity in extras %}
+              {% if entity not in [none, '', []] and entity not in ns.ids %}
+                {% set ns.ids = ns.ids + [entity] %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.ids }}
+
           current_hvac_mode: >-
             {% if head_entity in [none, '', []] %}
               none
@@ -491,13 +507,20 @@ actions:
               false
             {% elif set_temp in [none, '', []] %}
               false
+            {% elif temp_targets in [none, '', []] or (temp_targets | length == 0) %}
+              false
             {% else %}
-              {% set current = state_attr(head_entity, 'temperature') %}
-              {% if current in [none, '', 'unknown', 'unavailable'] %}
-                true
-              {% else %}
-                {{ (set_temp | float) | round(2) != (current | float) | round(2) }}
-              {% endif %}
+              {% set target = (set_temp | float) | round(2) %}
+              {% set ns = namespace(needs=false) %}
+              {% for entity in temp_targets %}
+                {% set current = state_attr(entity, 'temperature') %}
+                {% if current in [none, '', 'unknown', 'unavailable'] %}
+                  {% set ns.needs = true %}
+                {% elif (current | float) | round(2) != target %}
+                  {% set ns.needs = true %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.needs }}
             {% endif %}
 
       - choose:
@@ -516,15 +539,9 @@ actions:
                     sequence:
                       - action: climate.set_temperature
                         target:
-                          entity_id: !input head_unit
+                          entity_id: "{{ temp_targets }}"
                         data:
                           temperature: "{{ set_temp }}"
-                      - choose:
-                          - conditions: "{{ sync_script is defined and sync_script not in [none, '', []] }}"
-                            sequence:
-                              - action: script.turn_on
-                                target:
-                                  entity_id: "{{ sync_script }}"
 
       - choose:
           - conditions: "{{ control_dampers and mode != 'off' }}"
