@@ -535,7 +535,13 @@ actions:
                         data:
                           hvac_mode: "{{ mode }}"
               - choose:
-                  - conditions: "{{ mode in ['heat', 'cool'] and needs_temp_update }}"
+                  - conditions: "{{ mode in ['heat', 'cool'] and needs_mode_update and needs_temp_update }}"
+                    sequence:
+                      - wait_template: "{{ states(head_entity) == mode }}"
+                        timeout: "00:00:10"
+                        continue_on_timeout: true
+              - choose:
+                  - conditions: "{{ mode in ['heat', 'cool'] and needs_temp_update and states(head_entity) in ['heat', 'cool'] }}"
                     sequence:
                       - action: climate.set_temperature
                         target:
