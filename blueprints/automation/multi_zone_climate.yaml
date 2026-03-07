@@ -526,6 +526,9 @@ actions:
       - choose:
           - conditions: "{{ control_head }}"
             sequence:
+              - condition: state
+                entity_id: !input manual_override
+                state: "off"
               - choose:
                   - conditions: "{{ needs_mode_update }}"
                     sequence:
@@ -540,6 +543,9 @@ actions:
                       - wait_template: "{{ states(head_entity) == mode }}"
                         timeout: "00:00:10"
                         continue_on_timeout: true
+              - condition: state
+                entity_id: !input manual_override
+                state: "off"
               - choose:
                   - conditions: "{{ mode in ['heat', 'cool'] and needs_temp_update and states(head_entity) in ['heat', 'cool'] }}"
                     sequence:
@@ -552,11 +558,20 @@ actions:
       - choose:
           - conditions: "{{ control_dampers and mode != 'off' }}"
             sequence:
+              - condition: state
+                entity_id: !input manual_override
+                state: "off"
               - repeat:
                   for_each: "{{ zone_data }}"
                   sequence:
+                    - condition: state
+                      entity_id: !input manual_override
+                      state: "off"
                     - delay:
                         seconds: "{{ damper_delay | int }}"
+                    - condition: state
+                      entity_id: !input manual_override
+                      state: "off"
                     - choose:
                         - conditions: "{{ repeat.item.urgency > 0 }}"
                           sequence:
