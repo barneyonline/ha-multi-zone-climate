@@ -211,7 +211,7 @@ blueprint:
 
     zone_temperature_entities:
       name: Zone Temperature Climate Entities (optional)
-      description: Additional climate entities to keep aligned with the head-unit target temperature.
+      description: Additional climate entities to keep aligned with the head-unit target temperature. Entities that cannot accept the computed setpoint are skipped.
       default: []
       selector:
         entity:
@@ -475,18 +475,42 @@ actions:
             {% elif mode == 'cool' %}{{ cool_sp | float(high) }}
             {% else %}none{% endif %}
 
-          temp_targets: >-
+          extra_temp_targets: >-
             {% set ns = namespace(ids=[]) %}
-            {% if head_entity not in [none, '', []] %}
-              {% set ns.ids = ns.ids + [head_entity] %}
-            {% endif %}
             {% set extras = zone_temp_entities if (zone_temp_entities is list or zone_temp_entities is tuple) else ([zone_temp_entities] if zone_temp_entities not in [none, '', []] else []) %}
             {% for entity in extras %}
-              {% if entity not in [none, '', []] and entity not in ns.ids %}
+              {% if entity not in [none, '', []] and entity != head_entity and entity not in ns.ids %}
                 {% set ns.ids = ns.ids + [entity] %}
               {% endif %}
             {% endfor %}
             {{ ns.ids }}
+
+          extra_temp_targets_to_update: >-
+            {% if mode not in ['heat', 'cool'] or set_temp in [none, '', []] %}
+              []
+            {% else %}
+              {% set target = (set_temp | float) | round(2) %}
+              {% set ns = namespace(ids=[]) %}
+              {% for entity in extra_temp_targets %}
+                {% set current = state_attr(entity, 'temperature') %}
+                {% set min_value = state_attr(entity, 'min_temp') | float(default=none) %}
+                {% set max_value = state_attr(entity, 'max_temp') | float(default=none) %}
+                {% set step = state_attr(entity, 'target_temp_step') | float(0) %}
+                {% set step_ok = true %}
+                {% if step > 0 %}
+                  {% set rounded = (((target / step) | round(0)) * step) | round(4) %}
+                  {% set step_ok = ((rounded - target) | abs) < 0.001 %}
+                {% endif %}
+                {% if (min_value is none or target >= min_value)
+                   and (max_value is none or target <= max_value)
+                   and step_ok
+                   and (current in [none, '', 'unknown', 'unavailable']
+                     or ((current | float) | round(2)) != target) %}
+                  {% set ns.ids = ns.ids + [entity] %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.ids }}
+            {% endif %}
 
           current_hvac_mode: >-
             {% if head_entity in [none, '', []] %}
@@ -502,25 +526,21 @@ actions:
               {{ current_hvac_mode != mode }}
             {% endif %}
 
-          needs_temp_update: >-
+          head_needs_temp_update: >-
             {% if mode not in ['heat', 'cool'] %}
               false
             {% elif set_temp in [none, '', []] %}
               false
-            {% elif temp_targets in [none, '', []] or (temp_targets | length == 0) %}
+            {% elif head_entity in [none, '', []] %}
               false
             {% else %}
               {% set target = (set_temp | float) | round(2) %}
-              {% set ns = namespace(needs=false) %}
-              {% for entity in temp_targets %}
-                {% set current = state_attr(entity, 'temperature') %}
-                {% if current in [none, '', 'unknown', 'unavailable'] %}
-                  {% set ns.needs = true %}
-                {% elif (current | float) | round(2) != target %}
-                  {% set ns.needs = true %}
-                {% endif %}
-              {% endfor %}
-              {{ ns.needs }}
+              {% set current = state_attr(head_entity, 'temperature') %}
+              {% if current in [none, '', 'unknown', 'unavailable'] %}
+                true
+              {% else %}
+                {{ (current | float) | round(2) != target }}
+              {% endif %}
             {% endif %}
 
       - choose:
@@ -538,7 +558,7 @@ actions:
                         data:
                           hvac_mode: "{{ mode }}"
               - choose:
-                  - conditions: "{{ mode in ['heat', 'cool'] and needs_mode_update and needs_temp_update }}"
+                  - conditions: "{{ mode in ['heat', 'cool'] and needs_mode_update and set_temp not in [none, '', []] }}"
                     sequence:
                       - wait_template: "{{ states(head_entity) == mode }}"
                         timeout: "00:00:10"
@@ -547,13 +567,34 @@ actions:
                 entity_id: !input manual_override
                 state: "off"
               - choose:
-                  - conditions: "{{ mode in ['heat', 'cool'] and needs_temp_update and states(head_entity) in ['heat', 'cool'] }}"
+                  - conditions: "{{ mode in ['heat', 'cool'] and set_temp not in [none, '', []] and states(head_entity) in ['heat', 'cool'] }}"
                     sequence:
-                      - action: climate.set_temperature
-                        target:
-                          entity_id: "{{ temp_targets }}"
-                        data:
-                          temperature: "{{ set_temp }}"
+                      - choose:
+                          - conditions: "{{ head_needs_temp_update }}"
+                            sequence:
+                              - action: climate.set_temperature
+                                target:
+                                  entity_id: !input head_unit
+                                data:
+                                  temperature: "{{ set_temp }}"
+                              - wait_template: >-
+                                  {% set current = state_attr(head_entity, 'temperature') %}
+                                  {{ current not in [none, '', 'unknown', 'unavailable']
+                                     and ((current | float) | round(2)) == ((set_temp | float) | round(2)) }}
+                                timeout: "00:00:10"
+                                continue_on_timeout: true
+                      - choose:
+                          - conditions: "{{ extra_temp_targets_to_update | length > 0 }}"
+                            sequence:
+                              - condition: state
+                                entity_id: !input manual_override
+                                state: "off"
+                              - action: climate.set_temperature
+                                continue_on_error: true
+                                target:
+                                  entity_id: "{{ extra_temp_targets_to_update }}"
+                                data:
+                                  temperature: "{{ set_temp }}"
 
       - choose:
           - conditions: "{{ control_dampers and mode != 'off' }}"
