@@ -5,8 +5,8 @@ blueprint:
     urgent zone need, applies it once to a shared climate head-unit, then
     staggers per-zone damper control by urgency. Optionally mirrors the target
     set temperature to additional per-zone climate entities. Respects manual
-    overrides and includes hysteresis. Optionally gates on selected person
-    entities being home.
+    overrides and uses hysteresis only for the stop point. Optionally gates on
+    selected person entities being home.
   domain: automation
   # Avoid gating import on very new releases; keep broad compatibility
   # homeassistant:
@@ -95,8 +95,8 @@ blueprint:
 
     low_temp:
       name: Low Temperature Threshold
-      description: Manual fallback used when no input_number override is selected below.
-      default: 19
+      description: Heating starts below this zone temperature. A typical value is 1°C below the head-unit heat setpoint.
+      default: 20
       selector: { number: { min: 5, max: 30, unit_of_measurement: "°C" } }
 
     low_temp_input:
@@ -123,7 +123,7 @@ blueprint:
 
     high_temp:
       name: High Temperature Threshold
-      description: Manual fallback used when no input_number override is selected below.
+      description: Cooling starts above this zone temperature. A typical value is 1°C above the head-unit cool setpoint.
       default: 24
       selector: { number: { min: 15, max: 35, unit_of_measurement: "°C" } }
 
@@ -151,16 +151,19 @@ blueprint:
 
     heat_hysteresis:
       name: Heat Hysteresis
+      description: Extra temperature above the heat start threshold required before an active heating zone stops calling for heat.
       default: 0
       selector: { number: { min: 0, max: 5, step: 0.5, unit_of_measurement: "°C" } }
 
     cool_hysteresis:
       name: Cool Hysteresis
+      description: Extra temperature below the cool start threshold required before an active cooling zone stops calling for cooling.
       default: 0
       selector: { number: { min: 0, max: 5, step: 0.5, unit_of_measurement: "°C" } }
 
     dry_hysteresis:
       name: Dry Hysteresis
+      description: Extra humidity below the dry start threshold required before an active zone stops calling for dry mode.
       default: 0
       selector: { number: { min: 0, max: 20, step: 1, unit_of_measurement: "%" } }
 
@@ -372,6 +375,12 @@ actions:
           control_head:    !input control_head_unit
           control_dampers: !input control_dampers
           zone_temp_entities: !input zone_temperature_entities
+          current_hvac_mode: >-
+            {% if head_entity in [none, '', []] %}
+              none
+            {% else %}
+              {{ states(head_entity) }}
+            {% endif %}
 
           zone_data: >-
             {% set ns = namespace(out=[]) %}
@@ -398,6 +407,7 @@ actions:
                 } %}
 
                 {% if enabled and has_sensors %}
+                  {% set damper_open = is_state(z.damper_switch, 'on') %}
                   {% set t_vals = expand(t_ents)
                      | map(attribute='state')
                      | reject('in', ['unknown','unavailable','none','None','null'])
@@ -419,25 +429,30 @@ actions:
                   {% set cbuf = cool_buf | float(0) %}
                   {% set dbuf = dry_buf  | float(0) %}
 
-                  {% set band = z_high - z_low %}
-                  {% if band < 0 %}{% set band = 0 %}{% endif %}
-                  {% set total_buf = hbuf + cbuf %}
-                  {% if total_buf > band and total_buf > 0 %}
-                    {% set scale = band / total_buf %}
-                    {% set hbuf = hbuf * scale %}
-                    {% set cbuf = cbuf * scale %}
-                  {% endif %}
+                  {% set heat_start = z_low %}
+                  {% set heat_stop = z_low + hbuf %}
+                  {% set cool_start = z_high %}
+                  {% set cool_stop = z_high - cbuf %}
+                  {% set dry_start = z_hum_h %}
+                  {% set dry_stop = z_hum_h - dbuf %}
 
-                  {% set heat_thresh = z_low + hbuf %}
-                  {% set cool_thresh = z_high - cbuf %}
-                  {% set heat_needed = allow_heat and temp is not none and temp < heat_thresh %}
-                  {% set heat_sc = (heat_thresh - temp)
+                  {% set heat_active = current_hvac_mode == 'heat' and damper_open %}
+                  {% set cool_active = current_hvac_mode == 'cool' and damper_open %}
+                  {% set dry_active = current_hvac_mode == 'dry' and damper_open %}
+
+                  {% set heat_ref = heat_stop if heat_active else heat_start %}
+                  {% set cool_ref = cool_stop if cool_active else cool_start %}
+                  {% set dry_ref = dry_stop if dry_active else dry_start %}
+
+                  {% set heat_needed = allow_heat and temp is not none and (temp < heat_start or (heat_active and temp < heat_stop)) %}
+                  {% set heat_sc = (heat_ref - temp)
                      if heat_needed else 0 %}
-                  {% set cool_needed = allow_cool and temp is not none and temp > cool_thresh %}
-                  {% set cool_sc = (temp - cool_thresh)
+                  {% set cool_needed = allow_cool and temp is not none and (temp > cool_start or (cool_active and temp > cool_stop)) %}
+                  {% set cool_sc = (temp - cool_ref)
                      if cool_needed else 0 %}
-                  {% set dry_sc  = (hum - (z_hum_h + dbuf))
-                     if (allow_dry and hum  is not none and hum  > z_hum_h + dbuf and temp is not none and temp > z_dry_t) else 0 %}
+                  {% set dry_needed = allow_dry and hum is not none and temp is not none and temp > z_dry_t and (hum > dry_start or (dry_active and hum > dry_stop)) %}
+                  {% set dry_sc  = (hum - dry_ref)
+                     if dry_needed else 0 %}
                   {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
 
                   {% set data = {
@@ -469,6 +484,13 @@ actions:
           mode: >-
             {% set best = scores | dictsort(by='value', reverse=true) | first %}
             {{ best[0] if best and best[1] > 0 else 'off' }}
+
+          zone_data_for_mode: >-
+            {% if mode in ['heat', 'cool', 'dry'] %}
+              {{ zone_data | sort(attribute=mode, reverse=true) }}
+            {% else %}
+              {{ zone_data }}
+            {% endif %}
 
           set_temp: >-
             {% if mode == 'heat' %}{{ heat_sp | float(low) }}
@@ -510,13 +532,6 @@ actions:
                 {% endif %}
               {% endfor %}
               {{ ns.ids }}
-            {% endif %}
-
-          current_hvac_mode: >-
-            {% if head_entity in [none, '', []] %}
-              none
-            {% else %}
-              {{ states(head_entity) }}
             {% endif %}
 
           needs_mode_update: >-
@@ -603,7 +618,7 @@ actions:
                 entity_id: !input manual_override
                 state: "off"
               - repeat:
-                  for_each: "{{ zone_data }}"
+                  for_each: "{{ zone_data_for_mode }}"
                   sequence:
                     - condition: state
                       entity_id: !input manual_override
@@ -614,7 +629,10 @@ actions:
                       entity_id: !input manual_override
                       state: "off"
                     - choose:
-                        - conditions: "{{ repeat.item.urgency > 0 }}"
+                        - conditions: >-
+                            {{ (mode == 'heat' and repeat.item.heat > 0)
+                               or (mode == 'cool' and repeat.item.cool > 0)
+                               or (mode == 'dry' and repeat.item.dry > 0) }}
                           sequence:
                             - action: switch.turn_on
                               target:

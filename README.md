@@ -18,14 +18,14 @@ When creating an automation from the blueprint you will need to provide:
 - **Active Days** – days of the week when the schedule is enabled.
 - **Climate Head-Unit** – the shared climate entity to control.
 - **Zone Temperature Climate Entities** – optional additional climate entities (for example per-zone temperature entities) that should mirror the head-unit setpoint. If one of them cannot accept the computed setpoint, it will be skipped rather than failing the whole automation.
-- **Temperature & Humidity Thresholds** – values that trigger heating, cooling or dry mode.
+- **Temperature & Humidity Thresholds** – zone start thresholds for heating, cooling or dry mode. A common setup is `heat setpoint - 1°C` and `cool setpoint + 1°C`.
 - **Mode Toggles** – switches to enable or disable heating, cooling or dry mode as well as head-unit and damper control.
 - **Zone Configuration** – edit the YAML list of zones to specify each zone's damper switch and one or more temperature and/or humidity sensors. Optional overrides let you adjust thresholds per zone. Up to eight zones are supported.
 - **Zone Enable Flags** – optionally provide an `input_boolean` per zone to dynamically enable or disable that zone's damper.
 - **Enable/Override Flags** – input_boolean entities used to enable the schedule and to pause it manually.
 - **Damper Update Delay** – seconds to wait between zone damper changes.
 - **Update Interval** – how often the blueprint re-evaluates all zones (15s, 30s, 1m, 5m).
-- **Hysteresis Values** – optional buffers before heating, cooling or drying engage.
+- **Hysteresis Values** – optional stop-point buffers. For example, with a cool threshold of `23°C` and cool hysteresis of `0.5°C`, cooling starts at `23°C`, stops at `22.5°C`, then waits until the zone rises back to `23°C`.
 - **Zone Overrides** – per-zone thresholds and optional area selection.
 
 ### Example Zone Configuration
@@ -54,4 +54,4 @@ zones:
     high_temp: 25
 ```
 
-Once configured, the automation will automatically set the head-unit's mode and temperature and toggle individual dampers based on zone urgency.
+Once configured, the automation will automatically set the head-unit's mode and temperature and toggle individual dampers based on zone urgency. Heating and cooling thresholds are evaluated as start points, while hysteresis is only used to decide when an already-active zone can stop calling for that mode.
