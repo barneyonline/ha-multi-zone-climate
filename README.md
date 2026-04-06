@@ -17,7 +17,8 @@ When creating an automation from the blueprint you will need to provide:
 - **Schedule Start/End Times** – the daily window during which the system operates.
 - **Active Days** – days of the week when the schedule is enabled.
 - **Climate Head-Unit** – the shared climate entity to control.
-- **Zone Temperature Climate Entities** – optional additional climate entities (for example per-zone temperature entities) that should mirror the head-unit setpoint. If one of them cannot accept the computed setpoint, it will be skipped rather than failing the whole automation.
+- **Zone Temperature Climate Entities** – optional additional climate entities (for example per-zone temperature entities) that should track a zone-specific setpoint derived from the head-unit target. In `heat` mode the blueprint sends `head-unit target + offset`; in `cool` mode it sends `head-unit target - offset`. If one of them cannot accept the computed setpoint, it will be skipped rather than failing the whole automation.
+- **Zone Temperature Offset** – the adjustable `+/-` value used when updating the optional zone climate entities. The default is `1°C`, so a heat target of `20°C` becomes `21°C` for zones and a cool target of `23°C` becomes `22°C`.
 - **Temperature & Humidity Thresholds** – zone start thresholds for heating, cooling or dry mode. A common setup is `heat setpoint - 1°C` and `cool setpoint + 1°C`.
 - **Mode Toggles** – switches to enable or disable heating, cooling or dry mode as well as head-unit and damper control.
 - **Zone Configuration** – edit the YAML list of zones to specify each zone's damper switch and one or more temperature and/or humidity sensors. Optional overrides let you adjust thresholds per zone. Up to eight zones are supported.

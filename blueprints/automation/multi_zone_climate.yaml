@@ -214,12 +214,18 @@ blueprint:
 
     zone_temperature_entities:
       name: Zone Temperature Climate Entities (optional)
-      description: Additional climate entities to keep aligned with the head-unit target temperature. Entities that cannot accept the computed setpoint are skipped.
+      description: Additional climate entities to keep aligned with a mode-adjusted zone target temperature. In heat mode the zone target is the head-unit setpoint plus the zone temperature offset. In cool mode it is the head-unit setpoint minus the offset. Entities that cannot accept the computed setpoint are skipped.
       default: []
       selector:
         entity:
           domain: climate
           multiple: true
+
+    zone_temperature_offset:
+      name: Zone Temperature Offset
+      description: Amount added to the head-unit target in heat mode and subtracted in cool mode when updating zone temperature climate entities.
+      default: 1
+      selector: { number: { min: 0, max: 5, step: 0.5, unit_of_measurement: "°C" } }
 
     zones:
       name: Zones Configuration
@@ -375,6 +381,7 @@ actions:
           control_head:    !input control_head_unit
           control_dampers: !input control_dampers
           zone_temp_entities: !input zone_temperature_entities
+          zone_temp_offset: !input zone_temperature_offset
           current_hvac_mode: >-
             {% if head_entity in [none, '', []] %}
               none
@@ -497,6 +504,20 @@ actions:
             {% elif mode == 'cool' %}{{ cool_sp | float(high) }}
             {% else %}none{% endif %}
 
+          zone_set_temp: >-
+            {% if set_temp in [none, '', []] %}
+              none
+            {% else %}
+              {% set offset = zone_temp_offset | float(0) %}
+              {% if mode == 'heat' %}
+                {{ (set_temp | float) + offset }}
+              {% elif mode == 'cool' %}
+                {{ (set_temp | float) - offset }}
+              {% else %}
+                none
+              {% endif %}
+            {% endif %}
+
           extra_temp_targets: >-
             {% set ns = namespace(ids=[]) %}
             {% set extras = zone_temp_entities if (zone_temp_entities is list or zone_temp_entities is tuple) else ([zone_temp_entities] if zone_temp_entities not in [none, '', []] else []) %}
@@ -508,10 +529,10 @@ actions:
             {{ ns.ids }}
 
           extra_temp_targets_to_update: >-
-            {% if mode not in ['heat', 'cool'] or set_temp in [none, '', []] %}
+            {% if mode not in ['heat', 'cool'] or zone_set_temp in [none, '', []] %}
               []
             {% else %}
-              {% set target = (set_temp | float) | round(2) %}
+              {% set target = (zone_set_temp | float) | round(2) %}
               {% set ns = namespace(ids=[]) %}
               {% for entity in extra_temp_targets %}
                 {% set current = state_attr(entity, 'temperature') %}
@@ -609,7 +630,7 @@ actions:
                                 target:
                                   entity_id: "{{ extra_temp_targets_to_update }}"
                                 data:
-                                  temperature: "{{ set_temp }}"
+                                  temperature: "{{ zone_set_temp }}"
 
       - choose:
           - conditions: "{{ control_dampers and mode != 'off' }}"
