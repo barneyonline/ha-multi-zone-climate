@@ -253,12 +253,20 @@ variables:
 
 trigger_variables:
   _interval: !input update_interval
+  _persons: !input persons
 
 triggers:
   - trigger: time
     at: !input start_time
   - trigger: time
     at: !input end_time
+  - trigger: state
+    entity_id: !input enabled_flag
+  - trigger: state
+    entity_id: !input manual_override
+  - trigger: state
+    entity_id: !input persons
+    enabled: "{{ _persons | length > 0 }}"
   # Recalculate regularly so zone dampers/head unit respond to sensor changes
   - trigger: time_pattern
     minutes: "/1"
@@ -273,22 +281,6 @@ triggers:
     minutes: "/15"
     enabled: "{{ _interval == '15m' }}"
 
-conditions:
-  - condition: template
-    value_template: >-
-      {% if persons | length > 0 %}
-        {{ expand(persons) | selectattr('state','equalto','home') | list | count > 0 }}
-      {% else %} true {% endif %}
-
-  - condition: state
-    entity_id: !input enabled_flag
-    state: "on"
-
-  - condition: time
-    after: !input start_time
-    before: !input end_time
-    weekday: !input days
-
 actions:
   - variables:
       trigger_delay: !input trigger_delay
@@ -296,371 +288,449 @@ actions:
   - delay:
       seconds: "{{ trigger_delay | float(0) }}"
 
-  - if:
-      - condition: state
-        entity_id: !input manual_override
-        state: "off"
-    then:
-      - variables:
-          zones:        !input zones
+  - variables:
+      days: !input days
+      schedule_start: !input start_time
+      schedule_end: !input end_time
+      enabled_flag_entity: !input enabled_flag
+      manual_override_entity: !input manual_override
+      zones: !input zones
 
-          low_static:   !input low_temp
-          low_entity:   !input low_temp_input
-          low: >-
-            {% set entity = low_entity %}
-            {% set fallback = low_static | float %}
-            {% if entity in [none, '', []] %}
-              {{ fallback }}
-            {% else %}
-              {{ states(entity) | float(default=fallback) }}
+      low_static: !input low_temp
+      low_entity: !input low_temp_input
+      low: >-
+        {% set entity = low_entity %}
+        {% set fallback = low_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      high_static: !input high_temp
+      high_entity: !input high_temp_input
+      high: >-
+        {% set entity = high_entity %}
+        {% set fallback = high_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      dry_static: !input dry_temp
+      dry_entity: !input dry_temp_input
+      dry_t: >-
+        {% set entity = dry_entity %}
+        {% set fallback = dry_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      hum_static: !input hum_high
+      hum_entity: !input hum_high_input
+      hum_h: >-
+        {% set entity = hum_entity %}
+        {% set fallback = hum_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      heat_sp_static: !input heat_set
+      heat_sp_entity: !input heat_set_input
+      heat_sp: >-
+        {% set entity = heat_sp_entity %}
+        {% set fallback = heat_sp_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      cool_sp_static: !input cool_set
+      cool_sp_entity: !input cool_set_input
+      cool_sp: >-
+        {% set entity = cool_sp_entity %}
+        {% set fallback = cool_sp_static | float %}
+        {% if entity in [none, '', []] %}
+          {{ fallback }}
+        {% else %}
+          {{ states(entity) | float(default=fallback) }}
+        {% endif %}
+
+      heat_buf: !input heat_hysteresis
+      cool_buf: !input cool_hysteresis
+      dry_buf: !input dry_hysteresis
+      head_entity: !input head_unit
+      damper_delay: !input damper_delay
+      allow_heat: !input allow_heat
+      allow_cool: !input allow_cool
+      allow_dry: !input allow_dry
+      control_head: !input control_head_unit
+      control_dampers: !input control_dampers
+      zone_temp_entities: !input zone_temperature_entities
+      zone_temp_offset: !input zone_temperature_offset
+      current_hvac_mode: >-
+        {% if head_entity in [none, '', []] %}
+          none
+        {% else %}
+          {{ states(head_entity) }}
+        {% endif %}
+
+      presence_active: >-
+        {% if persons | length > 0 %}
+          {{ expand(persons) | selectattr('state','equalto','home') | list | count > 0 }}
+        {% else %}
+          true
+        {% endif %}
+
+      schedule_active: >-
+        {% set selected_days = days if (days is list or days is tuple) else [days] %}
+        {% set now_time = now().strftime('%H:%M:%S') %}
+        {% set today = now().strftime('%a') | lower %}
+        {% set yesterday = (now() - timedelta(days=1)).strftime('%a') | lower %}
+        {% set today_key = today[:3] %}
+        {% set yesterday_key = yesterday[:3] %}
+        {% if schedule_start == schedule_end %}
+          false
+        {% elif schedule_start < schedule_end %}
+          {{ today_key in selected_days and schedule_start <= now_time and now_time < schedule_end }}
+        {% else %}
+          {{ (today_key in selected_days and now_time >= schedule_start)
+             or (yesterday_key in selected_days and now_time < schedule_end) }}
+        {% endif %}
+
+      automation_active: >-
+        {{ is_state(enabled_flag_entity, 'on') and presence_active and schedule_active }}
+
+      zone_data: >-
+        {% set ns = namespace(out=[]) %}
+        {% for z in zones %}
+          {# Normalize sensors: allow single entity_id or list #}
+          {% set t_ents = z.temp_sensors if (z.temp_sensors is list or z.temp_sensors is tuple) else ([z.temp_sensors] if (z.temp_sensors is defined and z.temp_sensors is not none and z.temp_sensors != '') else []) %}
+          {% set h_ents = z.humidity_sensors if (z.humidity_sensors is list or z.humidity_sensors is tuple) else ([z.humidity_sensors] if (z.humidity_sensors is defined and z.humidity_sensors is not none and z.humidity_sensors != '') else []) %}
+          {% set has_sensors = (t_ents | length > 0) or (h_ents | length > 0) %}
+
+          {% set enabled = true %}
+          {% if z.enabled_flag is defined and z.enabled_flag not in ['', none] %}
+            {% set enabled = is_state(z.enabled_flag, 'on') %}
+          {% endif %}
+
+          {% if z.damper_switch %}
+            {% set data = {
+              'switch': z.damper_switch,
+              'temp': none,
+              'hum': none,
+              'heat': 0,
+              'cool': 0,
+              'dry': 0,
+              'urgency': 0
+            } %}
+
+            {% if enabled and has_sensors %}
+              {% set damper_open = is_state(z.damper_switch, 'on') %}
+              {% set t_vals = expand(t_ents)
+                 | map(attribute='state')
+                 | reject('in', ['unknown','unavailable','none','None','null'])
+                 | map('float') | list %}
+              {% set h_vals = expand(h_ents)
+                 | map(attribute='state')
+                 | reject('in', ['unknown','unavailable','none','None','null'])
+                 | map('float') | list %}
+
+              {% set temp = (t_vals | average(default=none)) %}
+              {% set hum  = (h_vals | average(default=none)) %}
+
+              {% set z_low    = (z.low_temp  | default(low,  true)) | float %}
+              {% set z_high   = (z.high_temp | default(high, true)) | float %}
+              {% set z_dry_t  = (z.dry_temp  | default(dry_t, true))| float %}
+              {% set z_hum_h  = (z.hum_high  | default(hum_h, true))| float %}
+
+              {% set hbuf = heat_buf | float(0) %}
+              {% set cbuf = cool_buf | float(0) %}
+              {% set dbuf = dry_buf  | float(0) %}
+
+              {% set heat_start = z_low %}
+              {% set heat_stop = z_low + hbuf %}
+              {% set cool_start = z_high %}
+              {% set cool_stop = z_high - cbuf %}
+              {% set dry_start = z_hum_h %}
+              {% set dry_stop = z_hum_h - dbuf %}
+
+              {% set heat_active = current_hvac_mode == 'heat' and damper_open %}
+              {% set cool_active = current_hvac_mode == 'cool' and damper_open %}
+              {% set dry_active = current_hvac_mode == 'dry' and damper_open %}
+
+              {% set heat_ref = heat_stop if heat_active else heat_start %}
+              {% set cool_ref = cool_stop if cool_active else cool_start %}
+              {% set dry_ref = dry_stop if dry_active else dry_start %}
+
+              {% set heat_needed = allow_heat and temp is not none and (temp < heat_start or (heat_active and temp < heat_stop)) %}
+              {% set heat_sc = (heat_ref - temp)
+                 if heat_needed else 0 %}
+              {% set cool_needed = allow_cool and temp is not none and (temp > cool_start or (cool_active and temp > cool_stop)) %}
+              {% set cool_sc = (temp - cool_ref)
+                 if cool_needed else 0 %}
+              {% set dry_needed = allow_dry and hum is not none and temp is not none and temp > z_dry_t and (hum > dry_start or (dry_active and hum > dry_stop)) %}
+              {% set dry_sc  = (hum - dry_ref)
+                 if dry_needed else 0 %}
+              {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
+
+              {% set data = {
+                'switch': z.damper_switch,
+                'temp': temp,
+                'hum': hum,
+                'heat': heat_sc,
+                'cool': cool_sc,
+                'dry': dry_sc,
+                'urgency': urg
+              } %}
             {% endif %}
 
-          high_static:  !input high_temp
-          high_entity:  !input high_temp_input
-          high: >-
-            {% set entity = high_entity %}
-            {% set fallback = high_static | float %}
-            {% if entity in [none, '', []] %}
-              {{ fallback }}
-            {% else %}
-              {{ states(entity) | float(default=fallback) }}
+            {% set ns.out = ns.out + [data] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.out | sort(attribute='urgency', reverse=true) }}
+
+      scores: >-
+        {% set heats = zone_data | map(attribute='heat') | list %}
+        {% set cools = zone_data | map(attribute='cool') | list %}
+        {% set drys  = zone_data | map(attribute='dry')  | list %}
+        {{ {
+          "heat": (heats | default([0]) | max),
+          "cool": (cools | default([0]) | max),
+          "dry":  (drys  | default([0]) | max)
+        } }}
+
+      mode: >-
+        {% set best = scores | dictsort(by='value', reverse=true) | first %}
+        {{ best[0] if best and best[1] > 0 else 'off' }}
+
+      zone_data_for_mode: >-
+        {% if mode in ['heat', 'cool', 'dry'] %}
+          {{ zone_data | sort(attribute=mode, reverse=true) }}
+        {% else %}
+          {{ zone_data }}
+        {% endif %}
+
+      set_temp: >-
+        {% if mode == 'heat' %}{{ heat_sp | float(low) }}
+        {% elif mode == 'cool' %}{{ cool_sp | float(high) }}
+        {% else %}none{% endif %}
+
+      zone_set_temp: >-
+        {% if set_temp in [none, '', []] %}
+          none
+        {% else %}
+          {% set offset = zone_temp_offset | float(0) %}
+          {% if mode == 'heat' %}
+            {{ (set_temp | float) + offset }}
+          {% elif mode == 'cool' %}
+            {{ (set_temp | float) - offset }}
+          {% else %}
+            none
+          {% endif %}
+        {% endif %}
+
+      extra_temp_targets: >-
+        {% set ns = namespace(ids=[]) %}
+        {% set extras = zone_temp_entities if (zone_temp_entities is list or zone_temp_entities is tuple) else ([zone_temp_entities] if zone_temp_entities not in [none, '', []] else []) %}
+        {% for entity in extras %}
+          {% if entity not in [none, '', []] and entity != head_entity and entity not in ns.ids %}
+            {% set ns.ids = ns.ids + [entity] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.ids }}
+
+      extra_temp_targets_to_update: >-
+        {% if mode not in ['heat', 'cool'] or zone_set_temp in [none, '', []] %}
+          []
+        {% else %}
+          {% set target = (zone_set_temp | float) | round(2) %}
+          {% set ns = namespace(ids=[]) %}
+          {% for entity in extra_temp_targets %}
+            {% set current = state_attr(entity, 'temperature') %}
+            {% set min_value = state_attr(entity, 'min_temp') | float(default=none) %}
+            {% set max_value = state_attr(entity, 'max_temp') | float(default=none) %}
+            {% set step = state_attr(entity, 'target_temp_step') | float(0) %}
+            {% set step_ok = true %}
+            {% if step > 0 %}
+              {% set rounded = (((target / step) | round(0)) * step) | round(4) %}
+              {% set step_ok = ((rounded - target) | abs) < 0.001 %}
             {% endif %}
-
-          dry_static:   !input dry_temp
-          dry_entity:   !input dry_temp_input
-          dry_t: >-
-            {% set entity = dry_entity %}
-            {% set fallback = dry_static | float %}
-            {% if entity in [none, '', []] %}
-              {{ fallback }}
-            {% else %}
-              {{ states(entity) | float(default=fallback) }}
+            {% if (min_value is none or target >= min_value)
+               and (max_value is none or target <= max_value)
+               and step_ok
+               and (current in [none, '', 'unknown', 'unavailable']
+                 or ((current | float) | round(2)) != target) %}
+              {% set ns.ids = ns.ids + [entity] %}
             {% endif %}
+          {% endfor %}
+          {{ ns.ids }}
+        {% endif %}
 
-          hum_static:   !input hum_high
-          hum_entity:   !input hum_high_input
-          hum_h: >-
-            {% set entity = hum_entity %}
-            {% set fallback = hum_static | float %}
-            {% if entity in [none, '', []] %}
-              {{ fallback }}
-            {% else %}
-              {{ states(entity) | float(default=fallback) }}
-            {% endif %}
+      needs_mode_update: >-
+        {% if mode in [none, '', []] %}
+          false
+        {% else %}
+          {{ current_hvac_mode != mode }}
+        {% endif %}
 
-          heat_sp_static: !input heat_set
-          heat_sp_entity: !input heat_set_input
-          heat_sp: >-
-            {% set entity = heat_sp_entity %}
-            {% set fallback = heat_sp_static | float %}
-            {% if entity in [none, '', []] %}
-              {{ fallback }}
-            {% else %}
-              {{ states(entity) | float(default=fallback) }}
-            {% endif %}
+      head_needs_temp_update: >-
+        {% if mode not in ['heat', 'cool'] %}
+          false
+        {% elif set_temp in [none, '', []] %}
+          false
+        {% elif head_entity in [none, '', []] %}
+          false
+        {% else %}
+          {% set target = (set_temp | float) | round(2) %}
+          {% set current = state_attr(head_entity, 'temperature') %}
+          {% if current in [none, '', 'unknown', 'unavailable'] %}
+            true
+          {% else %}
+            {{ (current | float) | round(2) != target }}
+          {% endif %}
+        {% endif %}
 
-          cool_sp_static: !input cool_set
-          cool_sp_entity: !input cool_set_input
-          cool_sp: >-
-            {% set entity = cool_sp_entity %}
-            {% set fallback = cool_sp_static | float %}
-            {% if entity in [none, '', []] %}
-              {{ fallback }}
-            {% else %}
-              {{ states(entity) | float(default=fallback) }}
-            {% endif %}
+  - choose:
+      - conditions: "{{ not automation_active }}"
+        sequence:
+          - choose:
+              - conditions: "{{ control_head and head_entity not in [none, '', []] and current_hvac_mode != 'off' }}"
+                sequence:
+                  - action: climate.set_hvac_mode
+                    target:
+                      entity_id: !input head_unit
+                    data:
+                      hvac_mode: "off"
 
-          heat_buf:     !input heat_hysteresis
-          cool_buf:     !input cool_hysteresis
-          dry_buf:      !input dry_hysteresis
-          head_entity:  !input head_unit
-          damper_delay: !input damper_delay
-          allow_heat:   !input allow_heat
-          allow_cool:   !input allow_cool
-          allow_dry:    !input allow_dry
-          control_head:    !input control_head_unit
-          control_dampers: !input control_dampers
-          zone_temp_entities: !input zone_temperature_entities
-          zone_temp_offset: !input zone_temperature_offset
-          current_hvac_mode: >-
-            {% if head_entity in [none, '', []] %}
-              none
-            {% else %}
-              {{ states(head_entity) }}
-            {% endif %}
+          - choose:
+              - conditions: "{{ control_dampers }}"
+                sequence:
+                  - repeat:
+                      for_each: "{{ zone_data }}"
+                      sequence:
+                        - variables:
+                            current_open: "{{ is_state(repeat.item.switch, 'on') }}"
+                        - choose:
+                            - conditions: "{{ current_open }}"
+                              sequence:
+                                - if:
+                                    - condition: template
+                                      value_template: "{{ not repeat.first }}"
+                                  then:
+                                    - delay:
+                                        seconds: "{{ damper_delay | int(0) }}"
+                                - action: switch.turn_off
+                                  target:
+                                    entity_id: "{{ repeat.item.switch }}"
 
-          zone_data: >-
-            {% set ns = namespace(out=[]) %}
-            {% for z in zones %}
-              {# Normalize sensors: allow single entity_id or list #}
-              {% set t_ents = z.temp_sensors if (z.temp_sensors is list or z.temp_sensors is tuple) else ([z.temp_sensors] if (z.temp_sensors is defined and z.temp_sensors is not none and z.temp_sensors != '') else []) %}
-              {% set h_ents = z.humidity_sensors if (z.humidity_sensors is list or z.humidity_sensors is tuple) else ([z.humidity_sensors] if (z.humidity_sensors is defined and z.humidity_sensors is not none and z.humidity_sensors != '') else []) %}
-              {% set has_sensors = (t_ents | length > 0) or (h_ents | length > 0) %}
+      - conditions: "{{ is_state(manual_override_entity, 'off') }}"
+        sequence:
+          - choose:
+              - conditions: "{{ control_head }}"
+                sequence:
+                  - condition: state
+                    entity_id: !input manual_override
+                    state: "off"
+                  - choose:
+                      - conditions: "{{ needs_mode_update }}"
+                        sequence:
+                          - action: climate.set_hvac_mode
+                            target:
+                              entity_id: !input head_unit
+                            data:
+                              hvac_mode: "{{ mode }}"
+                  - choose:
+                      - conditions: "{{ mode in ['heat', 'cool'] and needs_mode_update and set_temp not in [none, '', []] }}"
+                        sequence:
+                          - wait_template: "{{ states(head_entity) == mode }}"
+                            timeout: "00:00:10"
+                            continue_on_timeout: true
+                  - condition: state
+                    entity_id: !input manual_override
+                    state: "off"
+                  - choose:
+                      - conditions: "{{ mode in ['heat', 'cool'] and set_temp not in [none, '', []] and states(head_entity) in ['heat', 'cool'] }}"
+                        sequence:
+                          - choose:
+                              - conditions: "{{ head_needs_temp_update }}"
+                                sequence:
+                                  - action: climate.set_temperature
+                                    target:
+                                      entity_id: !input head_unit
+                                    data:
+                                      temperature: "{{ set_temp }}"
+                                  - wait_template: >-
+                                      {% set current = state_attr(head_entity, 'temperature') %}
+                                      {{ current not in [none, '', 'unknown', 'unavailable']
+                                         and ((current | float) | round(2)) == ((set_temp | float) | round(2)) }}
+                                    timeout: "00:00:10"
+                                    continue_on_timeout: true
+                          - choose:
+                              - conditions: "{{ extra_temp_targets_to_update | length > 0 }}"
+                                sequence:
+                                  - condition: state
+                                    entity_id: !input manual_override
+                                    state: "off"
+                                  - action: climate.set_temperature
+                                    continue_on_error: true
+                                    target:
+                                      entity_id: "{{ extra_temp_targets_to_update }}"
+                                    data:
+                                      temperature: "{{ zone_set_temp }}"
 
-              {% set enabled = true %}
-              {% if z.enabled_flag is defined and z.enabled_flag not in ['', none] %}
-                {% set enabled = is_state(z.enabled_flag, 'on') %}
-              {% endif %}
+          - choose:
+              - conditions: "{{ control_dampers }}"
+                sequence:
+                  - condition: state
+                    entity_id: !input manual_override
+                    state: "off"
+                  - repeat:
+                      for_each: "{{ zone_data_for_mode }}"
+                      sequence:
+                        - condition: state
+                          entity_id: !input manual_override
+                          state: "off"
+                        - variables:
+                            wants_open: >-
+                              {{ (mode == 'heat' and repeat.item.heat > 0)
+                                 or (mode == 'cool' and repeat.item.cool > 0)
+                                 or (mode == 'dry' and repeat.item.dry > 0) }}
+                            current_open: "{{ is_state(repeat.item.switch, 'on') }}"
+                        - choose:
+                            - conditions: "{{ wants_open and not current_open }}"
+                              sequence:
+                                - if:
+                                    - condition: template
+                                      value_template: "{{ not repeat.first }}"
+                                  then:
+                                    - delay:
+                                        seconds: "{{ damper_delay | int(0) }}"
+                                - condition: state
+                                  entity_id: !input manual_override
+                                  state: "off"
+                                - action: switch.turn_on
+                                  target:
+                                    entity_id: "{{ repeat.item.switch }}"
+                            - conditions: "{{ (not wants_open) and current_open }}"
+                              sequence:
+                                - if:
+                                    - condition: template
+                                      value_template: "{{ not repeat.first }}"
+                                  then:
+                                    - delay:
+                                        seconds: "{{ damper_delay | int(0) }}"
+                                - condition: state
+                                  entity_id: !input manual_override
+                                  state: "off"
+                                - action: switch.turn_off
+                                  target:
+                                    entity_id: "{{ repeat.item.switch }}"
 
-              {% if z.damper_switch %}
-                {% set data = {
-                  'switch': z.damper_switch,
-                  'temp': none,
-                  'hum': none,
-                  'heat': 0,
-                  'cool': 0,
-                  'dry': 0,
-                  'urgency': 0
-                } %}
-
-                {% if enabled and has_sensors %}
-                  {% set damper_open = is_state(z.damper_switch, 'on') %}
-                  {% set t_vals = expand(t_ents)
-                     | map(attribute='state')
-                     | reject('in', ['unknown','unavailable','none','None','null'])
-                     | map('float') | list %}
-                  {% set h_vals = expand(h_ents)
-                     | map(attribute='state')
-                     | reject('in', ['unknown','unavailable','none','None','null'])
-                     | map('float') | list %}
-
-                  {% set temp = (t_vals | average(default=none)) %}
-                  {% set hum  = (h_vals | average(default=none)) %}
-
-                  {% set z_low    = (z.low_temp  | default(low,  true)) | float %}
-                  {% set z_high   = (z.high_temp | default(high, true)) | float %}
-                  {% set z_dry_t  = (z.dry_temp  | default(dry_t, true))| float %}
-                  {% set z_hum_h  = (z.hum_high  | default(hum_h, true))| float %}
-
-                  {% set hbuf = heat_buf | float(0) %}
-                  {% set cbuf = cool_buf | float(0) %}
-                  {% set dbuf = dry_buf  | float(0) %}
-
-                  {% set heat_start = z_low %}
-                  {% set heat_stop = z_low + hbuf %}
-                  {% set cool_start = z_high %}
-                  {% set cool_stop = z_high - cbuf %}
-                  {% set dry_start = z_hum_h %}
-                  {% set dry_stop = z_hum_h - dbuf %}
-
-                  {% set heat_active = current_hvac_mode == 'heat' and damper_open %}
-                  {% set cool_active = current_hvac_mode == 'cool' and damper_open %}
-                  {% set dry_active = current_hvac_mode == 'dry' and damper_open %}
-
-                  {% set heat_ref = heat_stop if heat_active else heat_start %}
-                  {% set cool_ref = cool_stop if cool_active else cool_start %}
-                  {% set dry_ref = dry_stop if dry_active else dry_start %}
-
-                  {% set heat_needed = allow_heat and temp is not none and (temp < heat_start or (heat_active and temp < heat_stop)) %}
-                  {% set heat_sc = (heat_ref - temp)
-                     if heat_needed else 0 %}
-                  {% set cool_needed = allow_cool and temp is not none and (temp > cool_start or (cool_active and temp > cool_stop)) %}
-                  {% set cool_sc = (temp - cool_ref)
-                     if cool_needed else 0 %}
-                  {% set dry_needed = allow_dry and hum is not none and temp is not none and temp > z_dry_t and (hum > dry_start or (dry_active and hum > dry_stop)) %}
-                  {% set dry_sc  = (hum - dry_ref)
-                     if dry_needed else 0 %}
-                  {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
-
-                  {% set data = {
-                    'switch':   z.damper_switch,
-                    'temp':     temp,
-                    'hum':      hum,
-                    'heat':     heat_sc,
-                    'cool':     cool_sc,
-                    'dry':      dry_sc,
-                    'urgency':  urg
-                  } %}
-                {% endif %}
-
-                {% set ns.out = ns.out + [data] %}
-              {% endif %}
-            {% endfor %}
-            {{ ns.out | sort(attribute='urgency', reverse=true) }}
-
-          scores: >-
-            {% set heats = zone_data | map(attribute='heat') | list %}
-            {% set cools = zone_data | map(attribute='cool') | list %}
-            {% set drys  = zone_data | map(attribute='dry')  | list %}
-            {{ {
-              "heat": (heats | default([0]) | max),
-              "cool": (cools | default([0]) | max),
-              "dry":  (drys  | default([0]) | max)
-            } }}
-
-          mode: >-
-            {% set best = scores | dictsort(by='value', reverse=true) | first %}
-            {{ best[0] if best and best[1] > 0 else 'off' }}
-
-          zone_data_for_mode: >-
-            {% if mode in ['heat', 'cool', 'dry'] %}
-              {{ zone_data | sort(attribute=mode, reverse=true) }}
-            {% else %}
-              {{ zone_data }}
-            {% endif %}
-
-          set_temp: >-
-            {% if mode == 'heat' %}{{ heat_sp | float(low) }}
-            {% elif mode == 'cool' %}{{ cool_sp | float(high) }}
-            {% else %}none{% endif %}
-
-          zone_set_temp: >-
-            {% if set_temp in [none, '', []] %}
-              none
-            {% else %}
-              {% set offset = zone_temp_offset | float(0) %}
-              {% if mode == 'heat' %}
-                {{ (set_temp | float) + offset }}
-              {% elif mode == 'cool' %}
-                {{ (set_temp | float) - offset }}
-              {% else %}
-                none
-              {% endif %}
-            {% endif %}
-
-          extra_temp_targets: >-
-            {% set ns = namespace(ids=[]) %}
-            {% set extras = zone_temp_entities if (zone_temp_entities is list or zone_temp_entities is tuple) else ([zone_temp_entities] if zone_temp_entities not in [none, '', []] else []) %}
-            {% for entity in extras %}
-              {% if entity not in [none, '', []] and entity != head_entity and entity not in ns.ids %}
-                {% set ns.ids = ns.ids + [entity] %}
-              {% endif %}
-            {% endfor %}
-            {{ ns.ids }}
-
-          extra_temp_targets_to_update: >-
-            {% if mode not in ['heat', 'cool'] or zone_set_temp in [none, '', []] %}
-              []
-            {% else %}
-              {% set target = (zone_set_temp | float) | round(2) %}
-              {% set ns = namespace(ids=[]) %}
-              {% for entity in extra_temp_targets %}
-                {% set current = state_attr(entity, 'temperature') %}
-                {% set min_value = state_attr(entity, 'min_temp') | float(default=none) %}
-                {% set max_value = state_attr(entity, 'max_temp') | float(default=none) %}
-                {% set step = state_attr(entity, 'target_temp_step') | float(0) %}
-                {% set step_ok = true %}
-                {% if step > 0 %}
-                  {% set rounded = (((target / step) | round(0)) * step) | round(4) %}
-                  {% set step_ok = ((rounded - target) | abs) < 0.001 %}
-                {% endif %}
-                {% if (min_value is none or target >= min_value)
-                   and (max_value is none or target <= max_value)
-                   and step_ok
-                   and (current in [none, '', 'unknown', 'unavailable']
-                     or ((current | float) | round(2)) != target) %}
-                  {% set ns.ids = ns.ids + [entity] %}
-                {% endif %}
-              {% endfor %}
-              {{ ns.ids }}
-            {% endif %}
-
-          needs_mode_update: >-
-            {% if mode in [none, '', []] %}
-              false
-            {% else %}
-              {{ current_hvac_mode != mode }}
-            {% endif %}
-
-          head_needs_temp_update: >-
-            {% if mode not in ['heat', 'cool'] %}
-              false
-            {% elif set_temp in [none, '', []] %}
-              false
-            {% elif head_entity in [none, '', []] %}
-              false
-            {% else %}
-              {% set target = (set_temp | float) | round(2) %}
-              {% set current = state_attr(head_entity, 'temperature') %}
-              {% if current in [none, '', 'unknown', 'unavailable'] %}
-                true
-              {% else %}
-                {{ (current | float) | round(2) != target }}
-              {% endif %}
-            {% endif %}
-
-      - choose:
-          - conditions: "{{ control_head }}"
-            sequence:
-              - condition: state
-                entity_id: !input manual_override
-                state: "off"
-              - choose:
-                  - conditions: "{{ needs_mode_update }}"
-                    sequence:
-                      - action: climate.set_hvac_mode
-                        target:
-                          entity_id: !input head_unit
-                        data:
-                          hvac_mode: "{{ mode }}"
-              - choose:
-                  - conditions: "{{ mode in ['heat', 'cool'] and needs_mode_update and set_temp not in [none, '', []] }}"
-                    sequence:
-                      - wait_template: "{{ states(head_entity) == mode }}"
-                        timeout: "00:00:10"
-                        continue_on_timeout: true
-              - condition: state
-                entity_id: !input manual_override
-                state: "off"
-              - choose:
-                  - conditions: "{{ mode in ['heat', 'cool'] and set_temp not in [none, '', []] and states(head_entity) in ['heat', 'cool'] }}"
-                    sequence:
-                      - choose:
-                          - conditions: "{{ head_needs_temp_update }}"
-                            sequence:
-                              - action: climate.set_temperature
-                                target:
-                                  entity_id: !input head_unit
-                                data:
-                                  temperature: "{{ set_temp }}"
-                              - wait_template: >-
-                                  {% set current = state_attr(head_entity, 'temperature') %}
-                                  {{ current not in [none, '', 'unknown', 'unavailable']
-                                     and ((current | float) | round(2)) == ((set_temp | float) | round(2)) }}
-                                timeout: "00:00:10"
-                                continue_on_timeout: true
-                      - choose:
-                          - conditions: "{{ extra_temp_targets_to_update | length > 0 }}"
-                            sequence:
-                              - condition: state
-                                entity_id: !input manual_override
-                                state: "off"
-                              - action: climate.set_temperature
-                                continue_on_error: true
-                                target:
-                                  entity_id: "{{ extra_temp_targets_to_update }}"
-                                data:
-                                  temperature: "{{ zone_set_temp }}"
-
-      - choose:
-          - conditions: "{{ control_dampers and mode != 'off' }}"
-            sequence:
-              - condition: state
-                entity_id: !input manual_override
-                state: "off"
-              - repeat:
-                  for_each: "{{ zone_data_for_mode }}"
-                  sequence:
-                    - condition: state
-                      entity_id: !input manual_override
-                      state: "off"
-                    - delay:
-                        seconds: "{{ damper_delay | int }}"
-                    - condition: state
-                      entity_id: !input manual_override
-                      state: "off"
-                    - choose:
-                        - conditions: >-
-                            {{ (mode == 'heat' and repeat.item.heat > 0)
-                               or (mode == 'cool' and repeat.item.cool > 0)
-                               or (mode == 'dry' and repeat.item.dry > 0) }}
-                          sequence:
-                            - action: switch.turn_on
-                              target:
-                                entity_id: "{{ repeat.item.switch }}"
-                      default:
-                        - action: switch.turn_off
-                          target:
-                            entity_id: "{{ repeat.item.switch }}"
-
-mode: restart
+mode: queued

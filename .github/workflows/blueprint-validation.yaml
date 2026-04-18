@@ -25,10 +25,15 @@ jobs:
           python-version: '3.13'
 
       - name: Install Home Assistant Core
+        env:
+          HA_VERSION: '2025.6.0'
+          HA_CONSTRAINTS: 'https://raw.githubusercontent.com/home-assistant/core/2025.6.0/homeassistant/package_constraints.txt'
         run: |
           python --version
-          pip install --upgrade pip
-          pip install "homeassistant==2025.6.0"
+          python -m pip install --upgrade pip
+          python -m pip install \
+            --constraint "${HA_CONSTRAINTS}" \
+            "homeassistant==${HA_VERSION}"
           python - <<'PY'
           from importlib.metadata import version
           import sys
