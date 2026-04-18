@@ -35,7 +35,49 @@ def _ensure_stub_notifications() -> None:
     sys.modules[module_name] = stub
 
 
+def _ensure_pycares_compat() -> None:
+    """Patch missing legacy pycares result types used by older aiodns releases.
+
+    Home Assistant imports aiohttp during blueprint validation. Some resolver
+    combinations in CI install `aiodns` 3.x alongside newer `pycares` versions
+    where legacy type aliases like `ares_query_a_result` no longer exist.
+    Those names are only used for import-time type annotations, so a lightweight
+    shim is sufficient for validation.
+    """
+
+    try:
+        import pycares  # type: ignore
+    except ImportError:
+        return
+
+    if hasattr(pycares, "ares_query_a_result"):
+        return
+
+    def _compat_getattr(name: str):
+        if name.startswith("ares_") and name.endswith("_result"):
+            placeholder = type(name, (), {})
+            setattr(pycares, name, placeholder)
+            return placeholder
+        raise AttributeError(f"module 'pycares' has no attribute {name!r}")
+
+    current_getattr = getattr(pycares, "__getattr__", None)
+
+    if current_getattr is None:
+        pycares.__getattr__ = _compat_getattr
+        return
+
+    def _combined_getattr(name: str):
+        if name.startswith("ares_") and name.endswith("_result"):
+            placeholder = type(name, (), {})
+            setattr(pycares, name, placeholder)
+            return placeholder
+        return current_getattr(name)
+
+    pycares.__getattr__ = _combined_getattr
+
+
 _ensure_stub_notifications()
+_ensure_pycares_compat()
 
 from homeassistant.components.blueprint.errors import BlueprintException
 from homeassistant.components.blueprint.models import Blueprint
