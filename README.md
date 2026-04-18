@@ -1,6 +1,6 @@
 # Dynamic Multi‑Zone Climate Schedule (2025‑06)
 
-This repository provides a Home Assistant blueprint that coordinates a single HVAC head-unit across multiple zones. It selects a global heating, cooling or drying mode based on the most urgent zone and then staggers damper control for each zone.
+This repository provides a Home Assistant blueprint that coordinates a single HVAC head-unit across multiple zones. It selects a global heating, cooling or drying mode based on the most urgent zone, staggers damper changes for each zone, and explicitly shuts the system down when the schedule ends, nobody is home, or the automation is disabled.
 
 ## Importing the Blueprint
 
@@ -23,9 +23,9 @@ When creating an automation from the blueprint you will need to provide:
 - **Mode Toggles** – switches to enable or disable heating, cooling or dry mode as well as head-unit and damper control.
 - **Zone Configuration** – edit the YAML list of zones to specify each zone's damper switch and one or more temperature and/or humidity sensors. Optional overrides let you adjust thresholds per zone. Up to eight zones are supported.
 - **Zone Enable Flags** – optionally provide an `input_boolean` per zone to dynamically enable or disable that zone's damper.
-- **Enable/Override Flags** – input_boolean entities used to enable the schedule and to pause it manually.
+- **Enable/Override Flags** – input_boolean entities used to enable the schedule and to pause active automatic control manually. When the schedule window ends, nobody is home, or the automation is disabled, the blueprint turns the head unit off and closes dampers.
 - **Damper Update Delay** – seconds to wait between zone damper changes.
-- **Update Interval** – how often the blueprint re-evaluates all zones (15s, 30s, 1m, 5m).
+- **Update Interval** – how often the blueprint re-evaluates all zones (`1m`, `5m`, `10m`, `15m`).
 - **Hysteresis Values** – optional stop-point buffers. For example, with a cool threshold of `23°C` and cool hysteresis of `0.5°C`, cooling starts at `23°C`, stops at `22.5°C`, then waits until the zone rises back to `23°C`.
 - **Zone Overrides** – per-zone thresholds and optional area selection.
 
@@ -55,4 +55,4 @@ zones:
     high_temp: 25
 ```
 
-Once configured, the automation will automatically set the head-unit's mode and temperature and toggle individual dampers based on zone urgency. Heating and cooling thresholds are evaluated as start points, while hysteresis is only used to decide when an already-active zone can stop calling for that mode.
+Once configured, the automation will automatically set the head-unit's mode and temperature and toggle individual dampers based on zone urgency. Heating and cooling thresholds are evaluated as start points, while hysteresis is only used to decide when an already-active zone can stop calling for that mode. When there is no active demand, the blueprint also closes any dampers it previously opened so zone state does not drift stale.
