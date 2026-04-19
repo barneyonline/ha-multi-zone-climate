@@ -56,3 +56,14 @@ zones:
 ```
 
 Once configured, the automation will automatically set the head-unit's mode and temperature and toggle individual dampers based on zone urgency. Heating and cooling thresholds are evaluated as start points, while hysteresis is only used to decide when an already-active zone can stop calling for that mode. When there is no active demand, the blueprint also closes any dampers it previously opened so zone state does not drift stale.
+
+## Troubleshooting
+
+If you see a Home Assistant error like `Connection timeout to host http://<airbase-ip>/skyfi/aircon/set_zone_setting`, the failure is coming from the HVAC controller or the path to it rather than from blueprint templating. On Daikin AirBase systems, each zone switch call is translated by the integration into a request against the controller's `set_zone_setting` endpoint.
+
+The blueprint already avoids no-op damper writes, and individual damper service failures are allowed to continue so one slow zone update does not abort the whole automation run. If the timeout persists, check:
+
+- The controller at the logged IP is reachable and responsive on your LAN.
+- The selected damper entities are the intended zone switches for that controller.
+- Your `Update Interval` is not shorter than the time needed to work through a full damper sequence, especially when `Damper Update Delay` is high.
+- The controller is not busy or temporarily unavailable when many zone changes are requested in a short period.
