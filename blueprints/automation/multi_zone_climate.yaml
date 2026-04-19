@@ -619,6 +619,7 @@ actions:
                                     - delay:
                                         seconds: "{{ damper_delay | int(0) }}"
                                 - action: switch.turn_off
+                                  continue_on_error: true
                                   target:
                                     entity_id: "{{ repeat.item.switch }}"
 
@@ -708,6 +709,7 @@ actions:
                                   entity_id: !input manual_override
                                   state: "off"
                                 - action: switch.turn_on
+                                  continue_on_error: true
                                   target:
                                     entity_id: "{{ repeat.item.switch }}"
                             - conditions: "{{ (not wants_open) and current_open }}"
@@ -722,6 +724,7 @@ actions:
                                   entity_id: !input manual_override
                                   state: "off"
                                 - action: switch.turn_off
+                                  continue_on_error: true
                                   target:
                                     entity_id: "{{ repeat.item.switch }}"
 
