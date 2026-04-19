@@ -253,20 +253,12 @@ variables:
 
 trigger_variables:
   _interval: !input update_interval
-  _persons: !input persons
 
 triggers:
   - trigger: time
     at: !input start_time
   - trigger: time
     at: !input end_time
-  - trigger: state
-    entity_id: !input enabled_flag
-  - trigger: state
-    entity_id: !input manual_override
-  - trigger: state
-    entity_id: !input persons
-    enabled: "{{ _persons | length > 0 }}"
   # Recalculate regularly so zone dampers/head unit respond to sensor changes
   - trigger: time_pattern
     minutes: "/1"
