@@ -214,7 +214,7 @@ blueprint:
 
     zone_temperature_entities:
       name: Zone Temperature Climate Entities (optional)
-      description: Additional climate entities to keep aligned with a mode-adjusted zone target temperature. In heat mode the zone target is the head-unit setpoint plus the zone temperature offset. In cool mode it is the head-unit setpoint minus the offset. Entities that cannot accept the computed setpoint are skipped.
+      description: Additional climate entities to keep aligned with a mode-adjusted zone target temperature. In heat mode the zone target is the head-unit setpoint plus the zone temperature offset. In cool mode it is the head-unit setpoint minus the offset. Entities that are not ready for the selected heat/cool mode or cannot accept the computed setpoint are skipped.
       default: []
       selector:
         entity:
@@ -671,10 +671,25 @@ actions:
                                   - condition: state
                                     entity_id: !input manual_override
                                     state: "off"
+                                  - variables:
+                                      ready_extra_temp_targets_to_update: >-
+                                        {% if states(head_entity) != mode %}
+                                          []
+                                        {% else %}
+                                          {% set ns = namespace(ids=[]) %}
+                                          {% for entity in extra_temp_targets_to_update %}
+                                            {% if states(entity) == mode %}
+                                              {% set ns.ids = ns.ids + [entity] %}
+                                            {% endif %}
+                                          {% endfor %}
+                                          {{ ns.ids }}
+                                        {% endif %}
+                                  - condition: template
+                                    value_template: "{{ ready_extra_temp_targets_to_update | length > 0 }}"
                                   - action: climate.set_temperature
                                     continue_on_error: true
                                     target:
-                                      entity_id: "{{ extra_temp_targets_to_update }}"
+                                      entity_id: "{{ ready_extra_temp_targets_to_update }}"
                                     data:
                                       temperature: "{{ zone_set_temp }}"
 
