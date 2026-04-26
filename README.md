@@ -21,6 +21,7 @@ When creating an automation from the blueprint you will need to provide:
 - **Zone Temperature Offset** – the adjustable `+/-` value used when updating the optional zone climate entities. The default is `1°C`, so a heat target of `20°C` becomes `21°C` for zones and a cool target of `23°C` becomes `22°C`.
 - **Temperature & Humidity Thresholds** – zone start thresholds for heating, cooling or dry mode. A common setup is `heat setpoint - 1°C` and `cool setpoint + 1°C`.
 - **Mode Toggles** – switches to enable or disable heating, cooling or dry mode as well as head-unit and damper control.
+- **Damper Controller Availability Entity** – optional reachability entity for the zone controller. For Daikin AirBase, use a ping/connectivity sensor for the AirBase IP so damper writes are skipped while the controller is offline or not responding.
 - **Zone Configuration** – edit the YAML list of zones to specify each zone's damper switch and one or more temperature and/or humidity sensors. Optional overrides let you adjust thresholds per zone. Up to eight zones are supported.
 - **Zone Enable Flags** – optionally provide an `input_boolean` per zone to dynamically enable or disable that zone's damper.
 - **Enable/Override Flags** – input_boolean entities used to enable the schedule and to pause active automatic control manually. When the schedule window ends, nobody is home, or the automation is disabled, the blueprint turns the head unit off and closes dampers.
@@ -59,10 +60,11 @@ Once configured, the automation will automatically set the head-unit's mode and 
 
 ## Troubleshooting
 
-If you see a Home Assistant error like `Connection timeout to host http://<airbase-ip>/skyfi/aircon/set_zone_setting`, the failure is coming from the HVAC controller or the path to it rather than from blueprint templating. On Daikin AirBase systems, each zone switch call is translated by the integration into a request against the controller's `set_zone_setting` endpoint.
+If you see a Home Assistant error like `Connection timeout to host http://<airbase-ip>/skyfi/aircon/get_zone_setting`, the failure is coming from the HVAC controller or the path to it rather than from blueprint templating. On Daikin AirBase systems, each zone switch call is translated by the integration into requests against the controller's `get_zone_setting` and `set_zone_setting` endpoints.
 
-The blueprint already avoids no-op damper writes, and individual damper service failures are allowed to continue so one slow zone update does not abort the whole automation run. If the timeout persists, check:
+The blueprint avoids no-op damper writes, skips overlapping scheduled runs instead of queueing them behind a slow controller, and can skip damper writes entirely while an optional controller availability entity is not ready. If the timeout persists:
 
+- Add a ping/connectivity sensor for the controller IP and select it as **Damper Controller Availability Entity**.
 - The controller at the logged IP is reachable and responsive on your LAN.
 - The selected damper entities are the intended zone switches for that controller.
 - Your `Update Interval` is not shorter than the time needed to work through a full damper sequence, especially when `Damper Update Delay` is high.

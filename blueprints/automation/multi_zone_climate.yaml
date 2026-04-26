@@ -93,6 +93,13 @@ blueprint:
       default: true
       selector: { boolean: {} }
 
+    damper_controller_available:
+      name: Damper Controller Availability Entity (optional)
+      description: Optional binary_sensor, sensor, or switch that reports whether the damper controller is reachable. If provided, damper service calls are skipped unless this entity is on, home, open, or connected.
+      default: ""
+      selector:
+        entity: {}
+
     low_temp:
       name: Low Temperature Threshold
       description: Heating starts below this zone temperature. A typical value is 1°C below the head-unit heat setpoint.
@@ -364,6 +371,7 @@ actions:
       allow_dry: !input allow_dry
       control_head: !input control_head_unit
       control_dampers: !input control_dampers
+      damper_controller_available_entity: !input damper_controller_available
       zone_temp_entities: !input zone_temperature_entities
       zone_temp_offset: !input zone_temperature_offset
       current_hvac_mode: >-
@@ -398,6 +406,20 @@ actions:
 
       automation_active: >-
         {{ is_state(enabled_flag_entity, 'on') and presence_active and schedule_active }}
+
+      damper_controller_available_state: >-
+        {% if damper_controller_available_entity in [none, '', []] %}
+          available
+        {% else %}
+          {{ states(damper_controller_available_entity) }}
+        {% endif %}
+
+      dampers_available: >-
+        {% if damper_controller_available_entity in [none, '', []] %}
+          true
+        {% else %}
+          {{ damper_controller_available_state in ['on', 'home', 'open', 'connected'] }}
+        {% endif %}
 
       zone_data: >-
         {% set ns = namespace(out=[]) %}
@@ -602,13 +624,14 @@ actions:
                       hvac_mode: "off"
 
           - choose:
-              - conditions: "{{ control_dampers }}"
+              - conditions: "{{ control_dampers and dampers_available }}"
                 sequence:
                   - repeat:
                       for_each: "{{ zone_data }}"
                       sequence:
                         - variables:
-                            current_open: "{{ is_state(repeat.item.switch, 'on') }}"
+                            switch_state: "{{ states(repeat.item.switch) }}"
+                            current_open: "{{ switch_state == 'on' }}"
                         - choose:
                             - conditions: "{{ current_open }}"
                               sequence:
@@ -694,7 +717,7 @@ actions:
                                       temperature: "{{ zone_set_temp }}"
 
           - choose:
-              - conditions: "{{ control_dampers }}"
+              - conditions: "{{ control_dampers and dampers_available }}"
                 sequence:
                   - condition: state
                     entity_id: !input manual_override
@@ -710,9 +733,11 @@ actions:
                               {{ (mode == 'heat' and repeat.item.heat > 0)
                                  or (mode == 'cool' and repeat.item.cool > 0)
                                  or (mode == 'dry' and repeat.item.dry > 0) }}
-                            current_open: "{{ is_state(repeat.item.switch, 'on') }}"
+                            switch_state: "{{ states(repeat.item.switch) }}"
+                            switch_ready: "{{ switch_state not in ['unknown', 'unavailable'] }}"
+                            current_open: "{{ switch_state == 'on' }}"
                         - choose:
-                            - conditions: "{{ wants_open and not current_open }}"
+                            - conditions: "{{ switch_ready and wants_open and not current_open }}"
                               sequence:
                                 - if:
                                     - condition: template
@@ -727,7 +752,7 @@ actions:
                                   continue_on_error: true
                                   target:
                                     entity_id: "{{ repeat.item.switch }}"
-                            - conditions: "{{ (not wants_open) and current_open }}"
+                            - conditions: "{{ switch_ready and (not wants_open) and current_open }}"
                               sequence:
                                 - if:
                                     - condition: template
@@ -743,4 +768,5 @@ actions:
                                   target:
                                     entity_id: "{{ repeat.item.switch }}"
 
-mode: queued
+mode: single
+max_exceeded: silent
