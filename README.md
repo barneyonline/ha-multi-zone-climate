@@ -17,7 +17,7 @@ When creating an automation from the blueprint you will need to provide:
 - **Schedule Start/End Times** – the daily window during which the system operates.
 - **Active Days** – days of the week when the schedule is enabled.
 - **Climate Head-Unit** – the shared climate entity to control.
-- **Zone Temperature Climate Entities** – optional additional climate entities (for example per-zone temperature entities) that should track a zone-specific setpoint derived from the head-unit target. In `heat` mode the blueprint sends `head-unit target + offset`; in `cool` mode it sends `head-unit target - offset`. If one of them is not ready for the selected heat/cool mode or cannot accept the computed setpoint, it will be skipped rather than failing the whole automation.
+- **Zone Temperature Climate Entities** – optional additional climate entities (for example per-zone temperature entities) that should track a zone-specific setpoint derived from the head-unit target. In `heat` mode the blueprint sends `head-unit target + offset`; in `cool` mode it sends `head-unit target - offset`. Entities that are not ready for the selected heat/cool mode, do not advertise target-temperature support, or cannot accept the computed setpoint range are skipped.
 - **Zone Temperature Offset** – the adjustable `+/-` value used when updating the optional zone climate entities. The default is `1°C`, so a heat target of `20°C` becomes `21°C` for zones and a cool target of `23°C` becomes `22°C`.
 - **Temperature & Humidity Thresholds** – zone start thresholds for heating, cooling or dry mode. A common setup is `heat setpoint - 1°C` and `cool setpoint + 1°C`.
 - **Mode Toggles** – switches to enable or disable heating, cooling or dry mode as well as head-unit and damper control.
@@ -69,3 +69,5 @@ The blueprint avoids no-op damper writes, skips overlapping scheduled runs inste
 - The selected damper entities are the intended zone switches for that controller.
 - Your `Update Interval` is not shorter than the time needed to work through a full damper sequence, especially when `Damper Update Delay` is high.
 - The controller is not busy or temporarily unavailable when many zone changes are requested in a short period.
+
+If you see `Failed to set zone temperature. The device may not support this operation`, the failing call is the optional **Zone Temperature Climate Entities** sync. On Daikin zone climate entities this message is generic: it can mean the controller rejected that particular zone-temperature write even when the device normally supports zone temperature changes. Check whether the target is within the zone's current min/max range and whether the error appears during mode or head-unit setpoint changes.

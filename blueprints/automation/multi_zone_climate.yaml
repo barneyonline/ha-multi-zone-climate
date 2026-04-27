@@ -221,7 +221,7 @@ blueprint:
 
     zone_temperature_entities:
       name: Zone Temperature Climate Entities (optional)
-      description: Additional climate entities to keep aligned with a mode-adjusted zone target temperature. In heat mode the zone target is the head-unit setpoint plus the zone temperature offset. In cool mode it is the head-unit setpoint minus the offset. Entities that are not ready for the selected heat/cool mode or cannot accept the computed setpoint are skipped.
+      description: Additional climate entities to keep aligned with a mode-adjusted zone target temperature. In heat mode the zone target is the head-unit setpoint plus the zone temperature offset. In cool mode it is the head-unit setpoint minus the offset. Entities that are not ready for the selected heat/cool mode, do not advertise target-temperature support, or cannot accept the computed setpoint range are skipped.
       default: []
       selector:
         entity:
@@ -568,6 +568,8 @@ actions:
           {% set ns = namespace(ids=[]) %}
           {% for entity in extra_temp_targets %}
             {% set current = state_attr(entity, 'temperature') %}
+            {% set supported_features = state_attr(entity, 'supported_features') | int(0) %}
+            {% set supports_target_temperature = (supported_features % 2) == 1 %}
             {% set min_value = state_attr(entity, 'min_temp') | float(default=none) %}
             {% set max_value = state_attr(entity, 'max_temp') | float(default=none) %}
             {% set step = state_attr(entity, 'target_temp_step') | float(0) %}
@@ -576,7 +578,8 @@ actions:
               {% set rounded = (((target / step) | round(0)) * step) | round(4) %}
               {% set step_ok = ((rounded - target) | abs) < 0.001 %}
             {% endif %}
-            {% if (min_value is none or target >= min_value)
+            {% if supports_target_temperature
+               and (min_value is none or target >= min_value)
                and (max_value is none or target <= max_value)
                and step_ok
                and (current in [none, '', 'unknown', 'unavailable']
@@ -709,12 +712,29 @@ actions:
                                         {% endif %}
                                   - condition: template
                                     value_template: "{{ ready_extra_temp_targets_to_update | length > 0 }}"
-                                  - action: climate.set_temperature
-                                    continue_on_error: true
-                                    target:
-                                      entity_id: "{{ ready_extra_temp_targets_to_update }}"
-                                    data:
-                                      temperature: "{{ zone_set_temp }}"
+                                  - delay:
+                                      seconds: 2
+                                  - condition: state
+                                    entity_id: !input manual_override
+                                    state: "off"
+                                  - repeat:
+                                      for_each: "{{ ready_extra_temp_targets_to_update }}"
+                                      sequence:
+                                        - if:
+                                            - condition: template
+                                              value_template: "{{ not repeat.first }}"
+                                          then:
+                                            - delay:
+                                                seconds: 1
+                                        - condition: state
+                                          entity_id: !input manual_override
+                                          state: "off"
+                                        - action: climate.set_temperature
+                                          continue_on_error: true
+                                          target:
+                                            entity_id: "{{ repeat.item }}"
+                                          data:
+                                            temperature: "{{ zone_set_temp }}"
 
           - choose:
               - conditions: "{{ control_dampers and dampers_available }}"
