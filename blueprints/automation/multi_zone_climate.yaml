@@ -675,7 +675,7 @@ actions:
                     entity_id: !input manual_override
                     state: "off"
                   - choose:
-                      - conditions: "{{ mode in ['heat', 'cool'] and set_temp not in [none, '', []] and states(head_entity) in ['heat', 'cool'] }}"
+                      - conditions: "{{ mode in ['heat', 'cool'] and set_temp not in [none, '', []] and states(head_entity) == mode }}"
                         sequence:
                           - choose:
                               - conditions: "{{ head_needs_temp_update }}"
@@ -697,6 +697,20 @@ actions:
                                   - condition: state
                                     entity_id: !input manual_override
                                     state: "off"
+                                  - wait_template: >-
+                                      {% if states(head_entity) != mode %}
+                                        false
+                                      {% else %}
+                                        {% set ns = namespace(ready=true) %}
+                                        {% for entity in extra_temp_targets_to_update %}
+                                          {% if states(entity) != mode %}
+                                            {% set ns.ready = false %}
+                                          {% endif %}
+                                        {% endfor %}
+                                        {{ ns.ready }}
+                                      {% endif %}
+                                    timeout: "00:00:20"
+                                    continue_on_timeout: true
                                   - variables:
                                       ready_extra_temp_targets_to_update: >-
                                         {% if states(head_entity) != mode %}
@@ -729,6 +743,11 @@ actions:
                                         - condition: state
                                           entity_id: !input manual_override
                                           state: "off"
+                                        - wait_template: "{{ states(head_entity) == mode and states(repeat.item) == mode }}"
+                                          timeout: "00:00:10"
+                                          continue_on_timeout: true
+                                        - condition: template
+                                          value_template: "{{ states(head_entity) == mode and states(repeat.item) == mode }}"
                                         - action: climate.set_temperature
                                           continue_on_error: true
                                           target:
