@@ -405,7 +405,7 @@ actions:
         {% endif %}
 
       automation_active: >-
-        {{ is_state(enabled_flag_entity, 'on') and presence_active and schedule_active }}
+        {{ is_state(enabled_flag_entity, 'on') and (presence_active | bool) and (schedule_active | bool) }}
 
       damper_controller_available_state: >-
         {% if damper_controller_available_entity in [none, '', []] %}
@@ -483,13 +483,13 @@ actions:
               {% set cool_ref = cool_stop if cool_active else cool_start %}
               {% set dry_ref = dry_stop if dry_active else dry_start %}
 
-              {% set heat_needed = allow_heat and temp is not none and (temp < heat_start or (heat_active and temp < heat_stop)) %}
+              {% set heat_needed = (allow_heat | bool) and temp is not none and (temp < heat_start or (heat_active and temp < heat_stop)) %}
               {% set heat_sc = (heat_ref - temp)
                  if heat_needed else 0 %}
-              {% set cool_needed = allow_cool and temp is not none and (temp > cool_start or (cool_active and temp > cool_stop)) %}
+              {% set cool_needed = (allow_cool | bool) and temp is not none and (temp > cool_start or (cool_active and temp > cool_stop)) %}
               {% set cool_sc = (temp - cool_ref)
                  if cool_needed else 0 %}
-              {% set dry_needed = allow_dry and hum is not none and temp is not none and temp > z_dry_t and (hum > dry_start or (dry_active and hum > dry_stop)) %}
+              {% set dry_needed = (allow_dry | bool) and hum is not none and temp is not none and temp > z_dry_t and (hum > dry_start or (dry_active and hum > dry_stop)) %}
               {% set dry_sc  = (hum - dry_ref)
                  if dry_needed else 0 %}
               {% set urg = [heat_sc, cool_sc, dry_sc] | max %}
@@ -515,14 +515,20 @@ actions:
         {% set cools = zone_data | map(attribute='cool') | list %}
         {% set drys  = zone_data | map(attribute='dry')  | list %}
         {{ {
-          "heat": (heats | default([0]) | max),
-          "cool": (cools | default([0]) | max),
-          "dry":  (drys  | default([0]) | max)
+          "heat": ((heats | max) if (heats | count > 0) else 0),
+          "cool": ((cools | max) if (cools | count > 0) else 0),
+          "dry":  ((drys  | max) if (drys  | count > 0) else 0)
         } }}
 
       mode: >-
         {% set best = scores | dictsort(by='value', reverse=true) | first %}
         {{ best[0] if best and best[1] > 0 else 'off' }}
+
+      has_valid_zone_reading: >-
+        {{ zone_data
+           | selectattr('temp', 'ne', none)
+           | list
+           | count > 0 }}
 
       zone_data_for_mode: >-
         {% if mode in ['heat', 'cool', 'dry'] %}
@@ -593,6 +599,8 @@ actions:
       needs_mode_update: >-
         {% if mode in [none, '', []] %}
           false
+        {% elif mode == 'off' and not (has_valid_zone_reading | bool) %}
+          false
         {% else %}
           {{ current_hvac_mode != mode }}
         {% endif %}
@@ -615,7 +623,7 @@ actions:
         {% endif %}
 
   - choose:
-      - conditions: "{{ not automation_active }}"
+      - conditions: "{{ (schedule_active | bool) and not (automation_active | bool) and is_state(manual_override_entity, 'off') }}"
         sequence:
           - choose:
               - conditions: "{{ control_head and head_entity not in [none, '', []] and current_hvac_mode != 'off' }}"
@@ -649,7 +657,7 @@ actions:
                                   target:
                                     entity_id: "{{ repeat.item.switch }}"
 
-      - conditions: "{{ is_state(manual_override_entity, 'off') }}"
+      - conditions: "{{ (automation_active | bool) and is_state(manual_override_entity, 'off') }}"
         sequence:
           - choose:
               - conditions: "{{ control_head }}"
