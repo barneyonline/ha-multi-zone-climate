@@ -234,6 +234,12 @@ blueprint:
       default: 1
       selector: { number: { min: 0, max: 5, step: 0.5, unit_of_measurement: "°C" } }
 
+    zone_temperature_settle_delay:
+      name: Zone Temperature Settle Delay
+      description: Minimum seconds to wait after changing the head-unit mode or setpoint before writing optional zone temperature climate entities. Some controllers report the new mode before zone temperature writes are accepted.
+      default: 30
+      selector: { number: { min: 0, max: 120, unit_of_measurement: "s" } }
+
     zones:
       name: Zones Configuration
       description: |
@@ -374,6 +380,7 @@ actions:
       damper_controller_available_entity: !input damper_controller_available
       zone_temp_entities: !input zone_temperature_entities
       zone_temp_offset: !input zone_temperature_offset
+      zone_temp_settle_delay: !input zone_temperature_settle_delay
       current_hvac_mode: >-
         {% if head_entity in [none, '', []] %}
           none
@@ -735,7 +742,12 @@ actions:
                                   - condition: template
                                     value_template: "{{ ready_extra_temp_targets_to_update | length > 0 }}"
                                   - delay:
-                                      seconds: 2
+                                      seconds: >-
+                                        {% if needs_mode_update or head_needs_temp_update %}
+                                          {{ zone_temp_settle_delay | float(0) }}
+                                        {% else %}
+                                          2
+                                        {% endif %}
                                   - condition: state
                                     entity_id: !input manual_override
                                     state: "off"
