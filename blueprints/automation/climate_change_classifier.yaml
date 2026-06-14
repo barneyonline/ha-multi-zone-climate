@@ -1,0 +1,484 @@
+blueprint:
+  name: Climate Change Classifier (Schedule vs Manual)
+  description: >
+    Classifies target-temperature, HVAC mode, and damper changes as
+    schedule/automation-originated or manual. Home Assistant UI/app changes are
+    detected from user context, HomeKit changes are detected from
+    homekit_state_change events, and ambiguous physical-device changes are
+    treated as manual unless they occur inside a recent schedule guard window.
+  domain: automation
+  source_url: https://github.com/barneyonline/ha-multi-zone-climate/blob/main/blueprints/automation/climate_change_classifier.yaml
+
+  input:
+    head_unit:
+      name: Climate Head-Unit
+      description: Shared climate entity whose HVAC mode is monitored.
+      selector:
+        entity:
+          domain: climate
+
+    monitored_climate_entities:
+      name: Climate Entities to Monitor
+      description: Climate entities whose target temperature changes should be classified. Include the head-unit and any per-zone climate entities.
+      selector:
+        entity:
+          domain: climate
+          multiple: true
+
+    damper_switches:
+      name: Damper Switches to Monitor
+      description: Damper switch entities whose on/off changes should be classified.
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    schedule_automations:
+      name: Schedule/Automation Sources
+      description: Automations whose runs should be treated as scheduled climate changes rather than manual overrides.
+      default: []
+      selector:
+        entity:
+          domain: automation
+          multiple: true
+
+    schedule_guard_flag:
+      name: Schedule Guard Flag
+      description: Input boolean turned on when a schedule automation runs.
+      selector:
+        entity:
+          domain: input_boolean
+
+    schedule_guard_timer:
+      name: Schedule Guard Timer
+      description: Timer kept active while schedule-originated climate changes are expected to settle.
+      selector:
+        entity:
+          domain: timer
+
+    manual_override:
+      name: Manual Override Flag
+      description: Input boolean turned on when this classifier detects a manual climate or damper change.
+      selector:
+        entity:
+          domain: input_boolean
+
+    schedule_hold_seconds:
+      name: Schedule Guard Duration
+      description: Seconds to hold the schedule guard after a source automation runs.
+      default: 180
+      selector:
+        number:
+          min: 1
+          max: 900
+          unit_of_measurement: "s"
+
+    schedule_recent_window_seconds:
+      name: Recent Schedule Window
+      description: Seconds after a source automation last ran during which ambiguous state changes are still treated as scheduled.
+      default: 240
+      selector:
+        number:
+          min: 1
+          max: 1800
+          unit_of_measurement: "s"
+
+    temperature_change_for_seconds:
+      name: Temperature Change Settle Time
+      description: Seconds a target-temperature change must remain before it is classified.
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: "s"
+
+    mode_change_for_seconds:
+      name: Mode Change Settle Time
+      description: Seconds an HVAC mode change must remain before it is classified.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: "s"
+
+    state_settle_seconds:
+      name: Ambiguous State Settle Time
+      description: Seconds to wait before confirming an ambiguous physical/device-originated state change still matches.
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: "s"
+
+triggers:
+  - trigger: state
+    id: temp
+    entity_id: !input monitored_climate_entities
+    attribute: temperature
+    for:
+      seconds: !input temperature_change_for_seconds
+
+  - trigger: state
+    id: mode
+    entity_id: !input head_unit
+    for:
+      seconds: !input mode_change_for_seconds
+
+  - trigger: state
+    id: damper
+    entity_id: !input damper_switches
+
+  - trigger: event
+    id: homekit
+    event_type: homekit_state_change
+
+  - trigger: event
+    id: svc_climate_temp
+    event_type: call_service
+    event_data:
+      domain: climate
+      service: set_temperature
+
+  - trigger: event
+    id: svc_climate_mode
+    event_type: call_service
+    event_data:
+      domain: climate
+      service: set_hvac_mode
+
+  - trigger: event
+    id: svc_climate_on
+    event_type: call_service
+    event_data:
+      domain: climate
+      service: turn_on
+
+  - trigger: event
+    id: svc_climate_off
+    event_type: call_service
+    event_data:
+      domain: climate
+      service: turn_off
+
+  - trigger: event
+    id: svc_switch_on
+    event_type: call_service
+    event_data:
+      domain: switch
+      service: turn_on
+
+  - trigger: event
+    id: svc_switch_off
+    event_type: call_service
+    event_data:
+      domain: switch
+      service: turn_off
+
+  - trigger: event
+    id: svc_switch_toggle
+    event_type: call_service
+    event_data:
+      domain: switch
+      service: toggle
+
+  - trigger: event
+    id: svc_homeassistant_on
+    event_type: call_service
+    event_data:
+      domain: homeassistant
+      service: turn_on
+
+  - trigger: event
+    id: svc_homeassistant_off
+    event_type: call_service
+    event_data:
+      domain: homeassistant
+      service: turn_off
+
+  - trigger: event
+    id: svc_homeassistant_toggle
+    event_type: call_service
+    event_data:
+      domain: homeassistant
+      service: toggle
+
+  - trigger: event
+    id: schedule_evt
+    event_type: automation_triggered
+
+  - trigger: event
+    id: schedule_guard_finished
+    event_type: timer.finished
+
+conditions: []
+
+actions:
+  - variables:
+      head_entity: !input head_unit
+      climate_entities: !input monitored_climate_entities
+      damper_entities: !input damper_switches
+      schedule_automation_entities: !input schedule_automations
+      schedule_hold_seconds: !input schedule_hold_seconds
+      schedule_recent_window_seconds: !input schedule_recent_window_seconds
+      state_settle_seconds: !input state_settle_seconds
+      schedule_guard_flag_entity: !input schedule_guard_flag
+      schedule_guard_timer_entity: !input schedule_guard_timer
+      manual_override_entity: !input manual_override
+
+      monitored_entities: >-
+        {% set ns = namespace(ids=[]) %}
+        {% if head_entity not in [none, '', []] %}
+          {% set ns.ids = ns.ids + [head_entity] %}
+        {% endif %}
+
+        {% set climate_list = climate_entities if (climate_entities is sequence and climate_entities is not string) else ([climate_entities] if climate_entities not in [none, '', []] else []) %}
+        {% for entity in climate_list %}
+          {% if entity not in [none, '', []] and entity not in ns.ids %}
+            {% set ns.ids = ns.ids + [entity] %}
+          {% endif %}
+        {% endfor %}
+
+        {% set damper_list = damper_entities if (damper_entities is sequence and damper_entities is not string) else ([damper_entities] if damper_entities not in [none, '', []] else []) %}
+        {% for entity in damper_list %}
+          {% if entity not in [none, '', []] and entity not in ns.ids %}
+            {% set ns.ids = ns.ids + [entity] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.ids }}
+
+      is_service_event: |-
+        {{ trigger.platform == 'event'
+           and trigger.event is defined
+           and trigger.event.event_type == 'call_service' }}
+
+      is_homekit_event: |-
+        {{ trigger.platform == 'event'
+           and trigger.event is defined
+           and trigger.event.event_type == 'homekit_state_change' }}
+
+      service_targets: |-
+        {% set ns = namespace(ids=[]) %}
+        {% if is_service_event %}
+          {% set d = trigger.event.data | default({}) %}
+
+          {% if d.get('service_data') is mapping %}
+            {% set e1 = d.service_data.get('entity_id') %}
+            {% if e1 is string %}
+              {% set ns.ids = ns.ids + [e1] %}
+            {% elif e1 is sequence and e1 is not string %}
+              {% set ns.ids = ns.ids + (e1 | list) %}
+            {% endif %}
+          {% endif %}
+
+          {% if d.get('target') is mapping %}
+            {% set e2 = d.target.get('entity_id') %}
+            {% if e2 is string %}
+              {% set ns.ids = ns.ids + [e2] %}
+            {% elif e2 is sequence and e2 is not string %}
+              {% set ns.ids = ns.ids + (e2 | list) %}
+            {% endif %}
+          {% endif %}
+        {% endif %}
+        {{ ns.ids | unique | list }}
+
+      service_hits_monitored_entity: >-
+        {{ service_targets | select('in', monitored_entities) | list | count > 0 }}
+
+      homekit_targets: >-
+        {% set e = trigger.event.data.entity_id if is_homekit_event else none %}
+        {% if e is string %}
+          {{ [e] }}
+        {% elif e is sequence and e is not string %}
+          {{ e | list }}
+        {% else %}
+          {{ [] }}
+        {% endif %}
+
+      homekit_hits_monitored_entity: >-
+        {{ homekit_targets | select('in', monitored_entities) | list | count > 0 }}
+
+      schedule_event_hits_source_automation: >-
+        {{ trigger.id == 'schedule_evt'
+           and trigger.event is defined
+           and trigger.event.data.get('entity_id') in schedule_automation_entities }}
+
+      schedule_guard_timer_finished: >-
+        {{ trigger.id == 'schedule_guard_finished'
+           and trigger.event is defined
+           and trigger.event.data.get('entity_id') == schedule_guard_timer_entity }}
+
+      recent_schedule_seen: |-
+        {% set now_ts = as_timestamp(now()) %}
+        {% set ns = namespace(recent=
+          is_state(schedule_guard_flag_entity, 'on')
+          or is_state(schedule_guard_timer_entity, 'active')
+        ) %}
+        {% for automation_entity in schedule_automation_entities %}
+          {% set last = state_attr(automation_entity, 'last_triggered') %}
+          {% if last is not none and (now_ts - as_timestamp(last)) <= schedule_recent_window_seconds %}
+            {% set ns.recent = true %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.recent }}
+
+      state_change_is_valid: >-
+        {% if trigger.platform != 'state' or trigger.from_state is none or trigger.to_state is none %}
+          false
+        {% elif trigger.from_state.state in ['unavailable', 'unknown'] or trigger.to_state.state in ['unavailable', 'unknown'] %}
+          false
+        {% elif trigger.id == 'temp' %}
+          {% set t_to = trigger.to_state.attributes.get('temperature') %}
+          {% set t_fr = trigger.from_state.attributes.get('temperature') %}
+          {{ t_to not in [none, 'unknown', 'unavailable']
+             and t_fr not in [none, 'unknown', 'unavailable']
+             and (t_to | float | round(1)) != (t_fr | float | round(1)) }}
+        {% elif trigger.entity_id.startswith('climate.') %}
+          {{ trigger.from_state.state != trigger.to_state.state }}
+        {% elif trigger.entity_id.startswith('switch.') %}
+          {{ trigger.from_state.state in ['on', 'off']
+             and trigger.to_state.state in ['on', 'off']
+             and trigger.from_state.state != trigger.to_state.state }}
+        {% else %}
+          true
+        {% endif %}
+
+      state_change_still_matches_after_settle: |-
+        {% if trigger.platform != 'state' or trigger.to_state is none %}
+          false
+        {% elif trigger.id == 'temp' %}
+          {% set live = state_attr(trigger.entity_id, 'temperature') %}
+          {% set expected = trigger.to_state.attributes.get('temperature') %}
+          {{ live is not none and expected is not none
+             and (live | float | round(1)) == (expected | float | round(1)) }}
+        {% else %}
+          {{ states(trigger.entity_id) == trigger.to_state.state }}
+        {% endif %}
+
+      schedule_guard_duration: >-
+        {% set total = schedule_hold_seconds | int(180) %}
+        {{ '%02d:%02d:%02d' | format(total // 3600, (total % 3600) // 60, total % 60) }}
+
+  - choose:
+      - conditions:
+          - alias: Schedule guard timer finished
+            condition: template
+            value_template: "{{ schedule_guard_timer_finished }}"
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input schedule_guard_flag
+
+      - conditions:
+          - alias: Source schedule automation ran
+            condition: template
+            value_template: "{{ schedule_event_hits_source_automation }}"
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input schedule_guard_flag
+          - action: timer.start
+            target:
+              entity_id: !input schedule_guard_timer
+            data:
+              duration: "{{ schedule_guard_duration }}"
+
+      - conditions:
+          - alias: HomeKit-originated command targeted at the climate or dampers
+            condition: template
+            value_template: "{{ is_homekit_event and homekit_hits_monitored_entity }}"
+          - condition: state
+            entity_id: !input manual_override
+            state: "off"
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input manual_override
+
+      - conditions:
+          - alias: User-originated HA service call targeted at the climate or dampers
+            condition: template
+            value_template: |-
+              {{ is_service_event
+                 and service_hits_monitored_entity
+                 and trigger.event.context is not none
+                 and trigger.event.context.user_id is not none }}
+          - condition: state
+            entity_id: !input manual_override
+            state: "off"
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input manual_override
+
+      - conditions:
+          - alias: Service call came from an automation or script chain
+            condition: template
+            value_template: |-
+              {{ is_service_event
+                 and service_hits_monitored_entity
+                 and trigger.event.context is not none
+                 and trigger.event.context.user_id is none
+                 and trigger.event.context.parent_id is not none }}
+        sequence: []
+
+      - conditions:
+          - alias: State change clearly initiated by a HA user context
+            condition: template
+            value_template: |-
+              {{ trigger.platform == 'state'
+                 and trigger.to_state is not none
+                 and trigger.to_state.context is not none
+                 and trigger.to_state.context.user_id is not none }}
+          - condition: state
+            entity_id: !input manual_override
+            state: "off"
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input manual_override
+
+      - conditions:
+          - alias: State change came from an automation or script chain
+            condition: template
+            value_template: |-
+              {{ trigger.platform == 'state'
+                 and trigger.to_state is not none
+                 and trigger.to_state.context is not none
+                 and trigger.to_state.context.user_id is none
+                 and trigger.to_state.context.parent_id is not none }}
+        sequence: []
+
+      - conditions:
+          - alias: Ambiguous direct state change, likely HomeKit/physical/device-originated
+            condition: template
+            value_template: |-
+              {{ trigger.platform == 'state'
+                 and trigger.to_state is not none
+                 and trigger.to_state.context is not none
+                 and trigger.to_state.context.user_id is none
+                 and trigger.to_state.context.parent_id is none }}
+          - alias: Ignore unavailable, unknown and non-change updates
+            condition: template
+            value_template: "{{ state_change_is_valid }}"
+          - alias: Do not treat known schedule windows as manual
+            condition: template
+            value_template: "{{ not recent_schedule_seen }}"
+          - condition: state
+            entity_id: !input manual_override
+            state: "off"
+        sequence:
+          - delay:
+              seconds: "{{ state_settle_seconds }}"
+          - condition: template
+            value_template: "{{ not recent_schedule_seen }}"
+          - condition: template
+            value_template: "{{ state_change_still_matches_after_settle }}"
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input manual_override
+
+mode: parallel
+max: 20
