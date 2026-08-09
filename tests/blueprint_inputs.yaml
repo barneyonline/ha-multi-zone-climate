@@ -41,8 +41,8 @@ blueprints/automation/multi_zone_climate.yaml:
       enabled_flag: input_boolean.validation_main_zone
       temp_sensors: sensor.validation_living_temperature
       humidity_sensors: sensor.validation_living_humidity
-      low_temp: null
-      high_temp: null
+      low_temp: input_number.validation_main_heat_threshold
+      high_temp: input_number.validation_main_cool_threshold
       dry_temp: null
       hum_high: null
     - name: Bedrooms
@@ -50,8 +50,8 @@ blueprints/automation/multi_zone_climate.yaml:
       enabled_flag: input_boolean.validation_bedrooms_zone
       temp_sensors: sensor.validation_bedroom_temperature
       humidity_sensors: sensor.validation_bedroom_humidity
-      low_temp: null
-      high_temp: null
+      low_temp: input_number.validation_bedrooms_heat_threshold
+      high_temp: input_number.validation_bedrooms_cool_threshold
       dry_temp: null
       hum_high: null
   trigger_delay: 20
