@@ -9,9 +9,6 @@ blueprint:
     sensor/helper changes, with a periodic watchdog as a fallback. Optionally
     gates on selected person entities being home.
   domain: automation
-  # Avoid gating import on very new releases; keep broad compatibility
-  # homeassistant:
-  #   min_version: "2025.6.0"
   source_url: https://github.com/barneyonline/ha-multi-zone-climate/blob/main/blueprints/automation/multi_zone_climate.yaml
 
   input:
@@ -240,8 +237,14 @@ blueprint:
           multiple: true
 
     zone_temperature_offset:
-      name: Zone Temperature Offset
-      description: Amount added to the head-unit target in heat mode and subtracted in cool mode when updating zone temperature climate entities.
+      name: Zone Heat Temperature Offset
+      description: Amount added to the head-unit target in heat mode when updating zone temperature climate entities.
+      default: 1
+      selector: { number: { min: 0, max: 5, step: 0.5, unit_of_measurement: "°C" } }
+
+    zone_cool_temperature_offset:
+      name: Zone Cool Temperature Offset
+      description: Amount subtracted from the head-unit target in cool mode when updating zone temperature climate entities. Configure this separately when zone climates have a narrower target range than the head unit.
       default: 1
       selector: { number: { min: 0, max: 5, step: 0.5, unit_of_measurement: "°C" } }
 
@@ -307,6 +310,9 @@ triggers:
   - trigger: state
     id: presence_state
     entity_id: !input persons
+    # Supplying a null target matches every real state transition while ignoring
+    # person attribute-only updates such as GPS accuracy or coordinates.
+    to: null
   - trigger: state
     id: recalculation_state
     entity_id: !input recalculation_entities
@@ -454,7 +460,8 @@ actions:
       control_dampers: !input control_dampers
       damper_controller_available_entity: !input damper_controller_available
       zone_temp_entities: !input zone_temperature_entities
-      zone_temp_offset: !input zone_temperature_offset
+      zone_heat_temp_offset: !input zone_temperature_offset
+      zone_cool_temp_offset: !input zone_cool_temperature_offset
       zone_temp_settle_delay: !input zone_temperature_settle_delay
       current_hvac_mode: >-
         {% if head_entity in [none, '', []] %}
@@ -608,11 +615,10 @@ actions:
         {% if set_temp in [none, '', []] %}
           none
         {% else %}
-          {% set offset = zone_temp_offset | float(0) %}
           {% if mode == 'heat' %}
-            {{ (set_temp | float) + offset }}
+            {{ (set_temp | float) + (zone_heat_temp_offset | float(0)) }}
           {% elif mode == 'cool' %}
-            {{ (set_temp | float) - offset }}
+            {{ (set_temp | float) - (zone_cool_temp_offset | float(0)) }}
           {% else %}
             none
           {% endif %}

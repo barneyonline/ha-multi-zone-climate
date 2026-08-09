@@ -156,6 +156,13 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
         self.assertIn("value: 30m", self.schedule)
         self.assertIn("default: 1m", self.schedule)
 
+    def test_presence_changes_ignore_attribute_only_updates(self) -> None:
+        """GPS attribute refreshes must not occupy the single schedule runner."""
+        presence_trigger = self.schedule.split("id: presence_state", maxsplit=1)[
+            1
+        ].split("id: recalculation_state", maxsplit=1)[0]
+        self.assertIn("to: null", presence_trigger)
+
     def test_existing_schedule_three_inputs_remain_a_validation_fixture(self) -> None:
         """The user's legacy automation shape must stay covered by HA validation."""
         self.assertIn(
@@ -185,6 +192,13 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
             self.schedule.count('for_each: "{{ damper_updates }}"'), 2
         )
         self.assertNotIn('for_each: "{{ zone_data_for_mode }}"', self.schedule)
+
+    def test_heat_and_cool_zone_offsets_are_independent(self) -> None:
+        """Narrow-range zone climates need distinct heat and cool targets."""
+        self.assertIn("zone_cool_temperature_offset:", self.schedule)
+        self.assertIn("zone_heat_temp_offset | float(0)", self.schedule)
+        self.assertIn("zone_cool_temp_offset | float(0)", self.schedule)
+        self.assertIn("zone_cool_temperature_offset: 3", self.inputs)
 
 
 if __name__ == "__main__":
