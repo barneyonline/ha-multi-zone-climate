@@ -29,7 +29,7 @@ Create an automation from the schedule blueprint and select:
 - Schedule times/days, occupancy entities, enable flag, and manual override.
 - The head-unit climate entity and temperature/humidity setpoint helpers.
 - Up to eight zones, each with a damper, sensors, and optional enable flag or
-  threshold overrides.
+  threshold overrides. Overrides may be numbers or `input_number` entities.
 - Optional zone climate entities for direct temperature synchronization.
 
 Zone climate targets use independent offsets: `head target + heat offset` in

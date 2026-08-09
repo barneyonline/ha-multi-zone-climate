@@ -260,7 +260,7 @@ blueprint:
         Configure up to 8 zones. For each zone:
           – damper_switch (required)
           – one or more temperature sensors and/or humidity sensors.
-        Optional per-zone overrides let you tailor thresholds if they differ from globals.
+        Optional per-zone overrides accept numbers or entity IDs, letting you tailor thresholds if they differ from globals.
         You may also specify an input_boolean "enabled_flag" to dynamically enable or disable the zone.
       default:
         - name: Zone 1
@@ -528,10 +528,42 @@ actions:
               {% set temp = (t_vals | average(default=none)) %}
               {% set hum  = (h_vals | average(default=none)) %}
 
-              {% set z_low    = (z.low_temp  | default(low,  true)) | float %}
-              {% set z_high   = (z.high_temp | default(high, true)) | float %}
-              {% set z_dry_t  = (z.dry_temp  | default(dry_t, true))| float %}
-              {% set z_hum_h  = (z.hum_high  | default(hum_h, true))| float %}
+              {# Zone overrides may be static numbers or dynamic helper entities. #}
+              {% set z_low_raw = z.low_temp | default(none) %}
+              {% if z_low_raw in [none, ''] %}
+                {% set z_low = low | float %}
+              {% elif z_low_raw is string and '.' in z_low_raw %}
+                {% set z_low = states(z_low_raw) | float(default=(low | float)) %}
+              {% else %}
+                {% set z_low = z_low_raw | float(default=(low | float)) %}
+              {% endif %}
+
+              {% set z_high_raw = z.high_temp | default(none) %}
+              {% if z_high_raw in [none, ''] %}
+                {% set z_high = high | float %}
+              {% elif z_high_raw is string and '.' in z_high_raw %}
+                {% set z_high = states(z_high_raw) | float(default=(high | float)) %}
+              {% else %}
+                {% set z_high = z_high_raw | float(default=(high | float)) %}
+              {% endif %}
+
+              {% set z_dry_raw = z.dry_temp | default(none) %}
+              {% if z_dry_raw in [none, ''] %}
+                {% set z_dry_t = dry_t | float %}
+              {% elif z_dry_raw is string and '.' in z_dry_raw %}
+                {% set z_dry_t = states(z_dry_raw) | float(default=(dry_t | float)) %}
+              {% else %}
+                {% set z_dry_t = z_dry_raw | float(default=(dry_t | float)) %}
+              {% endif %}
+
+              {% set z_hum_raw = z.hum_high | default(none) %}
+              {% if z_hum_raw in [none, ''] %}
+                {% set z_hum_h = hum_h | float %}
+              {% elif z_hum_raw is string and '.' in z_hum_raw %}
+                {% set z_hum_h = states(z_hum_raw) | float(default=(hum_h | float)) %}
+              {% else %}
+                {% set z_hum_h = z_hum_raw | float(default=(hum_h | float)) %}
+              {% endif %}
 
               {% set heat_start = z_low %}
               {% set heat_stop = z_low + hbuf %}

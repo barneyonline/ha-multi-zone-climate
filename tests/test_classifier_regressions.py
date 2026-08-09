@@ -200,6 +200,24 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
         self.assertIn("zone_cool_temp_offset | float(0)", self.schedule)
         self.assertIn("zone_cool_temperature_offset: 3", self.inputs)
 
+    def test_zone_threshold_overrides_accept_helper_entities(self) -> None:
+        """Per-zone dashboard helpers must resolve to their current states."""
+        for override, fallback in (
+            ("z_low_raw", "low"),
+            ("z_high_raw", "high"),
+            ("z_dry_raw", "dry_t"),
+            ("z_hum_raw", "hum_h"),
+        ):
+            with self.subTest(override=override):
+                self.assertIn(f"states({override})", self.schedule)
+                self.assertIn(f"default=({fallback} | float)", self.schedule)
+        self.assertIn(
+            "low_temp: input_number.validation_main_heat_threshold", self.inputs
+        )
+        self.assertIn(
+            "high_temp: input_number.validation_bedrooms_cool_threshold", self.inputs
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
