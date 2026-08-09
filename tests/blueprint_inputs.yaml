@@ -34,6 +34,7 @@ blueprints/automation/multi_zone_climate.yaml:
   zone_temperature_entities:
     - climate.validation_main_temperature
     - climate.validation_bedrooms_temperature
+  zone_cool_temperature_offset: 3
   zones:
     - name: Main
       damper_switch: switch.validation_main_damper
