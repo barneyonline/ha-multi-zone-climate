@@ -9,9 +9,6 @@ blueprint:
     sensor/helper changes, with a periodic watchdog as a fallback. Optionally
     gates on selected person entities being home.
   domain: automation
-  # Avoid gating import on very new releases; keep broad compatibility
-  # homeassistant:
-  #   min_version: "2025.6.0"
   source_url: https://github.com/barneyonline/ha-multi-zone-climate/blob/main/blueprints/automation/multi_zone_climate.yaml
 
   input:
