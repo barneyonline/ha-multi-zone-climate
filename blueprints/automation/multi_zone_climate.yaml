@@ -1,12 +1,13 @@
 blueprint:
-  name: Dynamic Multi-Zone Climate Schedule (2025-06)
+  name: Dynamic Multi-Zone Climate Schedule
   description: >
     Computes a single global HVAC mode (heat/cool/dry/off) based on the most
     urgent zone need, applies it once to a shared climate head-unit, then
     staggers per-zone damper control by urgency. Optionally mirrors the target
     set temperature to additional per-zone climate entities. Respects manual
-    overrides and uses hysteresis only for the stop point. Optionally gates on
-    selected person entities being home.
+    overrides and uses hysteresis only for the stop point. Reacts to selected
+    sensor/helper changes, with a periodic watchdog as a fallback. Optionally
+    gates on selected person entities being home.
   domain: automation
   # Avoid gating import on very new releases; keep broad compatibility
   # homeassistant:
@@ -204,12 +205,13 @@ blueprint:
 
     damper_delay:
       name: Damper Update Delay
+      description: Seconds to wait between damper service calls that are actually needed. Dampers already in the requested state do not consume a delay slot.
       default: 10
       selector: { number: { min: 0, max: 60, unit_of_measurement: "s" } }
 
     update_interval:
-      name: Update Interval
-      description: How often to re-evaluate zones and update head unit/dampers.
+      name: Watchdog Update Interval
+      description: Periodic fallback interval. The one-minute default preserves existing automation behavior; after selecting the zone sensors and helpers below for immediate event-driven recalculation, you can increase this interval. Periodic watchdog runs skip the trigger settle delay.
       default: 1m
       selector:
         select:
@@ -218,6 +220,15 @@ blueprint:
             - { label: Every 5 minutes, value: 5m }
             - { label: Every 10 minutes, value: 10m }
             - { label: Every 15 minutes, value: 15m }
+            - { label: Every 30 minutes, value: 30m }
+
+    recalculation_entities:
+      name: Event-Driven Recalculation Entities
+      description: Select zone temperature/humidity sensors, zone enable flags, threshold/setpoint helpers, and controller availability entities. Changes are debounced using Trigger Settle Delay and then evaluated immediately; the watchdog remains as a fallback.
+      default: []
+      selector:
+        entity:
+          multiple: true
 
     zone_temperature_entities:
       name: Zone Temperature Climate Entities (optional)
@@ -272,7 +283,7 @@ triggers:
     at: !input start_time
   - trigger: time
     at: !input end_time
-  # Recalculate regularly so zone dampers/head unit respond to sensor changes
+  # Periodic fallback for missed or unselected state changes.
   - trigger: time_pattern
     minutes: "/1"
     enabled: "{{ _interval == '1m' }}"
@@ -285,20 +296,84 @@ triggers:
   - trigger: time_pattern
     minutes: "/15"
     enabled: "{{ _interval == '15m' }}"
+  - trigger: time_pattern
+    minutes: "/30"
+    enabled: "{{ _interval == '30m' }}"
+  - trigger: state
+    id: control_state
+    entity_id:
+      - !input enabled_flag
+      - !input manual_override
+  - trigger: state
+    id: presence_state
+    entity_id: !input persons
+  - trigger: state
+    id: recalculation_state
+    entity_id: !input recalculation_entities
 
 actions:
   - variables:
       trigger_delay: !input trigger_delay
-
-  - delay:
-      seconds: "{{ trigger_delay | float(0) }}"
-
-  - variables:
       days: !input days
       schedule_start: !input start_time
       schedule_end: !input end_time
-      enabled_flag_entity: !input enabled_flag
       manual_override_entity: !input manual_override
+      initial_schedule_active: >-
+        {% set selected_days = days if (days is list or days is tuple) else [days] %}
+        {% set current = now() %}
+        {% set now_time = current.strftime('%H:%M:%S') %}
+        {% set today_key = current.strftime('%a') | lower | truncate(3, true, '') %}
+        {% set yesterday_key = (current - timedelta(days=1)).strftime('%a') | lower | truncate(3, true, '') %}
+        {% if schedule_start == schedule_end %}
+          false
+        {% elif schedule_start < schedule_end %}
+          {{ today_key in selected_days and schedule_start <= now_time and now_time < schedule_end }}
+        {% else %}
+          {{ (today_key in selected_days and now_time >= schedule_start)
+             or (yesterday_key in selected_days and now_time < schedule_end) }}
+        {% endif %}
+      effective_trigger_delay: >-
+        {{ 0 if trigger.platform == 'time_pattern' else (trigger_delay | float(0)) }}
+
+  - alias: Skip inactive windows and manual overrides before expensive evaluation
+    condition: template
+    value_template: >-
+      {{ (initial_schedule_active | bool)
+         and is_state(manual_override_entity, 'off') }}
+
+  - delay:
+      seconds: "{{ effective_trigger_delay }}"
+
+  - variables:
+      presence_active: >-
+        {% if persons | length > 0 %}
+          {{ expand(persons) | selectattr('state','equalto','home') | list | count > 0 }}
+        {% else %}
+          true
+        {% endif %}
+      schedule_active: >-
+        {% set selected_days = days if (days is list or days is tuple) else [days] %}
+        {% set current = now() %}
+        {% set now_time = current.strftime('%H:%M:%S') %}
+        {% set today_key = current.strftime('%a') | lower | truncate(3, true, '') %}
+        {% set yesterday_key = (current - timedelta(days=1)).strftime('%a') | lower | truncate(3, true, '') %}
+        {% if schedule_start == schedule_end %}
+          false
+        {% elif schedule_start < schedule_end %}
+          {{ today_key in selected_days and schedule_start <= now_time and now_time < schedule_end }}
+        {% else %}
+          {{ (today_key in selected_days and now_time >= schedule_start)
+             or (yesterday_key in selected_days and now_time < schedule_end) }}
+        {% endif %}
+
+  - alias: Recheck schedule and override after the debounce delay
+    condition: template
+    value_template: >-
+      {{ (schedule_active | bool)
+         and is_state(manual_override_entity, 'off') }}
+
+  - variables:
+      enabled_flag_entity: !input enabled_flag
       zones: !input zones
 
       low_static: !input low_temp
@@ -388,29 +463,6 @@ actions:
           {{ states(head_entity) }}
         {% endif %}
 
-      presence_active: >-
-        {% if persons | length > 0 %}
-          {{ expand(persons) | selectattr('state','equalto','home') | list | count > 0 }}
-        {% else %}
-          true
-        {% endif %}
-
-      schedule_active: >-
-        {% set selected_days = days if (days is list or days is tuple) else [days] %}
-        {% set now_time = now().strftime('%H:%M:%S') %}
-        {% set today = now().strftime('%a') | lower %}
-        {% set yesterday = (now() - timedelta(days=1)).strftime('%a') | lower %}
-        {% set today_key = today[:3] %}
-        {% set yesterday_key = yesterday[:3] %}
-        {% if schedule_start == schedule_end %}
-          false
-        {% elif schedule_start < schedule_end %}
-          {{ today_key in selected_days and schedule_start <= now_time and now_time < schedule_end }}
-        {% else %}
-          {{ (today_key in selected_days and now_time >= schedule_start)
-             or (yesterday_key in selected_days and now_time < schedule_end) }}
-        {% endif %}
-
       automation_active: >-
         {{ is_state(enabled_flag_entity, 'on') and (presence_active | bool) and (schedule_active | bool) }}
 
@@ -428,8 +480,11 @@ actions:
           {{ damper_controller_available_state in ['on', 'home', 'open', 'connected'] }}
         {% endif %}
 
-      zone_data: >-
-        {% set ns = namespace(out=[]) %}
+      zone_model: >-
+        {% set ns = namespace(out=[], heat_max=0, cool_max=0, dry_max=0, has_valid_temp=false) %}
+        {% set hbuf = heat_buf | float(0) %}
+        {% set cbuf = cool_buf | float(0) %}
+        {% set dbuf = dry_buf | float(0) %}
         {% for z in zones %}
           {# Normalize sensors: allow single entity_id or list #}
           {% set t_ents = z.temp_sensors if (z.temp_sensors is list or z.temp_sensors is tuple) else ([z.temp_sensors] if (z.temp_sensors is defined and z.temp_sensors is not none and z.temp_sensors != '') else []) %}
@@ -471,10 +526,6 @@ actions:
               {% set z_dry_t  = (z.dry_temp  | default(dry_t, true))| float %}
               {% set z_hum_h  = (z.hum_high  | default(hum_h, true))| float %}
 
-              {% set hbuf = heat_buf | float(0) %}
-              {% set cbuf = cool_buf | float(0) %}
-              {% set dbuf = dry_buf  | float(0) %}
-
               {% set heat_start = z_low %}
               {% set heat_stop = z_low + hbuf %}
               {% set cool_start = z_high %}
@@ -513,29 +564,33 @@ actions:
             {% endif %}
 
             {% set ns.out = ns.out + [data] %}
+            {% set ns.heat_max = [ns.heat_max, data.heat] | max %}
+            {% set ns.cool_max = [ns.cool_max, data.cool] | max %}
+            {% set ns.dry_max = [ns.dry_max, data.dry] | max %}
+            {% if data.temp is not none %}
+              {% set ns.has_valid_temp = true %}
+            {% endif %}
           {% endif %}
         {% endfor %}
-        {{ ns.out | sort(attribute='urgency', reverse=true) }}
-
-      scores: >-
-        {% set heats = zone_data | map(attribute='heat') | list %}
-        {% set cools = zone_data | map(attribute='cool') | list %}
-        {% set drys  = zone_data | map(attribute='dry')  | list %}
         {{ {
-          "heat": ((heats | max) if (heats | count > 0) else 0),
-          "cool": ((cools | max) if (cools | count > 0) else 0),
-          "dry":  ((drys  | max) if (drys  | count > 0) else 0)
+          'zones': ns.out,
+          'scores': {
+            'heat': ns.heat_max,
+            'cool': ns.cool_max,
+            'dry': ns.dry_max
+          },
+          'has_valid_temp': ns.has_valid_temp
         } }}
+
+      zone_data: "{{ zone_model.zones }}"
+
+      scores: "{{ zone_model.scores }}"
 
       mode: >-
         {% set best = scores | dictsort(by='value', reverse=true) | first %}
         {{ best[0] if best and best[1] > 0 else 'off' }}
 
-      has_valid_zone_reading: >-
-        {{ zone_data
-           | selectattr('temp', 'ne', none)
-           | list
-           | count > 0 }}
+      has_valid_zone_reading: "{{ zone_model.has_valid_temp }}"
 
       zone_data_for_mode: >-
         {% if mode in ['heat', 'cool', 'dry'] %}
@@ -629,12 +684,37 @@ actions:
           {% endif %}
         {% endif %}
 
+      damper_updates: >-
+        {% set ns = namespace(items=[]) %}
+        {% if control_dampers and (dampers_available | bool) %}
+          {% set candidates = zone_data_for_mode if (automation_active | bool) else zone_data %}
+          {% for item in candidates %}
+            {% set wants_open = (automation_active | bool)
+               and ((mode == 'heat' and item.heat > 0)
+                 or (mode == 'cool' and item.cool > 0)
+                 or (mode == 'dry' and item.dry > 0)) %}
+            {% set switch_state = states(item.switch) %}
+            {% if switch_state not in ['unknown', 'unavailable']
+               and ((wants_open and switch_state != 'on')
+                 or ((not wants_open) and switch_state == 'on')) %}
+              {% set ns.items = ns.items + [{
+                'switch': item.switch,
+                'desired': 'on' if wants_open else 'off'
+              }] %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        {{ ns.items }}
+
   - choose:
       - conditions: "{{ (schedule_active | bool) and not (automation_active | bool) and is_state(manual_override_entity, 'off') }}"
         sequence:
           - choose:
               - conditions: "{{ control_head and head_entity not in [none, '', []] and current_hvac_mode != 'off' }}"
                 sequence:
+                  - event: multi_zone_climate_scheduled_control
+                    event_data:
+                      entity_id: !input head_unit
                   - action: climate.set_hvac_mode
                     target:
                       entity_id: !input head_unit
@@ -645,24 +725,26 @@ actions:
               - conditions: "{{ control_dampers and dampers_available }}"
                 sequence:
                   - repeat:
-                      for_each: "{{ zone_data }}"
+                      for_each: "{{ damper_updates }}"
                       sequence:
-                        - variables:
-                            switch_state: "{{ states(repeat.item.switch) }}"
-                            current_open: "{{ switch_state == 'on' }}"
-                        - choose:
-                            - conditions: "{{ current_open }}"
-                              sequence:
-                                - if:
-                                    - condition: template
-                                      value_template: "{{ not repeat.first }}"
-                                  then:
-                                    - delay:
-                                        seconds: "{{ damper_delay | int(0) }}"
-                                - action: switch.turn_off
-                                  continue_on_error: true
-                                  target:
-                                    entity_id: "{{ repeat.item.switch }}"
+                        - if:
+                            - condition: template
+                              value_template: "{{ not repeat.first }}"
+                          then:
+                            - delay:
+                                seconds: "{{ damper_delay | int(0) }}"
+                        - condition: state
+                          entity_id: !input manual_override
+                          state: "off"
+                        - condition: template
+                          value_template: "{{ states(repeat.item.switch) == 'on' }}"
+                        - event: multi_zone_climate_scheduled_control
+                          event_data:
+                            entity_id: "{{ repeat.item.switch }}"
+                        - action: switch.turn_off
+                          continue_on_error: true
+                          target:
+                            entity_id: "{{ repeat.item.switch }}"
 
       - conditions: "{{ (automation_active | bool) and is_state(manual_override_entity, 'off') }}"
         sequence:
@@ -675,6 +757,9 @@ actions:
                   - choose:
                       - conditions: "{{ needs_mode_update }}"
                         sequence:
+                          - event: multi_zone_climate_scheduled_control
+                            event_data:
+                              entity_id: !input head_unit
                           - action: climate.set_hvac_mode
                             target:
                               entity_id: !input head_unit
@@ -695,6 +780,9 @@ actions:
                           - choose:
                               - conditions: "{{ head_needs_temp_update }}"
                                 sequence:
+                                  - event: multi_zone_climate_scheduled_control
+                                    event_data:
+                                      entity_id: !input head_unit
                                   - action: climate.set_temperature
                                     target:
                                       entity_id: !input head_unit
@@ -751,29 +839,34 @@ actions:
                                   - condition: state
                                     entity_id: !input manual_override
                                     state: "off"
-                                  - repeat:
-                                      for_each: "{{ ready_extra_temp_targets_to_update }}"
-                                      sequence:
-                                        - if:
-                                            - condition: template
-                                              value_template: "{{ not repeat.first }}"
-                                          then:
-                                            - delay:
-                                                seconds: 1
-                                        - condition: state
-                                          entity_id: !input manual_override
-                                          state: "off"
-                                        - wait_template: "{{ states(head_entity) == mode and states(repeat.item) == mode }}"
-                                          timeout: "00:00:10"
-                                          continue_on_timeout: true
-                                        - condition: template
-                                          value_template: "{{ states(head_entity) == mode and states(repeat.item) == mode }}"
-                                        - action: climate.set_temperature
-                                          continue_on_error: true
-                                          target:
-                                            entity_id: "{{ repeat.item }}"
-                                          data:
-                                            temperature: "{{ zone_set_temp }}"
+                                  - variables:
+                                      batched_extra_temp_targets: >-
+                                        {% if states(head_entity) != mode %}
+                                          []
+                                        {% else %}
+                                          {% set ns = namespace(ids=[]) %}
+                                          {% set target = (zone_set_temp | float) | round(2) %}
+                                          {% for entity in ready_extra_temp_targets_to_update %}
+                                            {% set current = state_attr(entity, 'temperature') %}
+                                            {% if states(entity) == mode
+                                               and (current in [none, '', 'unknown', 'unavailable']
+                                                 or ((current | float) | round(2)) != target) %}
+                                              {% set ns.ids = ns.ids + [entity] %}
+                                            {% endif %}
+                                          {% endfor %}
+                                          {{ ns.ids }}
+                                        {% endif %}
+                                  - condition: template
+                                    value_template: "{{ batched_extra_temp_targets | length > 0 }}"
+                                  - event: multi_zone_climate_scheduled_control
+                                    event_data:
+                                      entity_id: "{{ batched_extra_temp_targets }}"
+                                  - action: climate.set_temperature
+                                    continue_on_error: true
+                                    target:
+                                      entity_id: "{{ batched_extra_temp_targets }}"
+                                    data:
+                                      temperature: "{{ zone_set_temp }}"
 
           - choose:
               - conditions: "{{ control_dampers and dampers_available }}"
@@ -782,46 +875,35 @@ actions:
                     entity_id: !input manual_override
                     state: "off"
                   - repeat:
-                      for_each: "{{ zone_data_for_mode }}"
+                      for_each: "{{ damper_updates }}"
                       sequence:
                         - condition: state
                           entity_id: !input manual_override
                           state: "off"
-                        - variables:
-                            wants_open: >-
-                              {{ (mode == 'heat' and repeat.item.heat > 0)
-                                 or (mode == 'cool' and repeat.item.cool > 0)
-                                 or (mode == 'dry' and repeat.item.dry > 0) }}
-                            switch_state: "{{ states(repeat.item.switch) }}"
-                            switch_ready: "{{ switch_state not in ['unknown', 'unavailable'] }}"
-                            current_open: "{{ switch_state == 'on' }}"
+                        - if:
+                            - condition: template
+                              value_template: "{{ not repeat.first }}"
+                          then:
+                            - delay:
+                                seconds: "{{ damper_delay | int(0) }}"
+                        - condition: state
+                          entity_id: !input manual_override
+                          state: "off"
                         - choose:
-                            - conditions: "{{ switch_ready and wants_open and not current_open }}"
+                            - conditions: "{{ repeat.item.desired == 'on' and states(repeat.item.switch) != 'on' }}"
                               sequence:
-                                - if:
-                                    - condition: template
-                                      value_template: "{{ not repeat.first }}"
-                                  then:
-                                    - delay:
-                                        seconds: "{{ damper_delay | int(0) }}"
-                                - condition: state
-                                  entity_id: !input manual_override
-                                  state: "off"
+                                - event: multi_zone_climate_scheduled_control
+                                  event_data:
+                                    entity_id: "{{ repeat.item.switch }}"
                                 - action: switch.turn_on
                                   continue_on_error: true
                                   target:
                                     entity_id: "{{ repeat.item.switch }}"
-                            - conditions: "{{ switch_ready and (not wants_open) and current_open }}"
+                            - conditions: "{{ repeat.item.desired == 'off' and states(repeat.item.switch) == 'on' }}"
                               sequence:
-                                - if:
-                                    - condition: template
-                                      value_template: "{{ not repeat.first }}"
-                                  then:
-                                    - delay:
-                                        seconds: "{{ damper_delay | int(0) }}"
-                                - condition: state
-                                  entity_id: !input manual_override
-                                  state: "off"
+                                - event: multi_zone_climate_scheduled_control
+                                  event_data:
+                                    entity_id: "{{ repeat.item.switch }}"
                                 - action: switch.turn_off
                                   continue_on_error: true
                                   target:
