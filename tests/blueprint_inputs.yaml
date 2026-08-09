@@ -1,0 +1,57 @@
+blueprints/automation/climate_change_classifier.yaml:
+  head_unit: climate.validation_head_unit
+  monitored_climate_entities:
+    - climate.validation_head_unit
+    - climate.validation_zone
+  damper_switches:
+    - switch.validation_damper
+  schedule_guard_flag: input_boolean.validation_schedule_guard
+  schedule_guard_timer: timer.validation_schedule_guard
+  manual_override: input_boolean.validation_manual_override
+
+blueprints/automation/multi_zone_climate.yaml:
+  start_time: "17:00:00"
+  end_time: "22:29:59"
+  enabled_flag: input_boolean.validation_schedule_enabled
+  manual_override: input_boolean.validation_manual_override
+  persons:
+    - person.validation_one
+    - person.validation_two
+  head_unit: climate.validation_head_unit
+  low_temp_input: input_number.validation_low_temp
+  heat_set_input: input_number.validation_heat_temp
+  high_temp_input: input_number.validation_high_temp
+  cool_set_input: input_number.validation_cool_temp
+  heat_hysteresis: 0.5
+  cool_hysteresis: 0.5
+  dry_hysteresis: 5
+  dry_temp_input: input_number.validation_dry_temp
+  hum_high_input: input_number.validation_humidity_high
+  # Intentionally retained to verify that automations created from the older
+  # optional script-hook version continue to expand successfully. Direct zone
+  # climate synchronization below supersedes this legacy input.
+  temperature_sync_script: script.validation_legacy_temperature_sync
+  zone_temperature_entities:
+    - climate.validation_main_temperature
+    - climate.validation_bedrooms_temperature
+  zones:
+    - name: Main
+      damper_switch: switch.validation_main_damper
+      enabled_flag: input_boolean.validation_main_zone
+      temp_sensors: sensor.validation_living_temperature
+      humidity_sensors: sensor.validation_living_humidity
+      low_temp: null
+      high_temp: null
+      dry_temp: null
+      hum_high: null
+    - name: Bedrooms
+      damper_switch: switch.validation_bedrooms_damper
+      enabled_flag: input_boolean.validation_bedrooms_zone
+      temp_sensors: sensor.validation_bedroom_temperature
+      humidity_sensors: sensor.validation_bedroom_humidity
+      low_temp: null
+      high_temp: null
+      dry_temp: null
+      hum_high: null
+  trigger_delay: 20
+  update_interval: 15m

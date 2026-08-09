@@ -6,6 +6,9 @@ Example:
 
     python ha_blueprint_validate.py blueprints/**/*.yaml
 """
+# Home Assistant imports must follow the standalone compatibility shims below.
+# ruff: noqa: E402
+
 import asyncio
 import inspect
 import sys
@@ -79,8 +82,15 @@ def _ensure_pycares_compat() -> None:
 _ensure_stub_notifications()
 _ensure_pycares_compat()
 
+from homeassistant import loader
+from homeassistant.components.automation.config import PLATFORM_SCHEMA
 from homeassistant.components.blueprint.errors import BlueprintException
-from homeassistant.components.blueprint.models import Blueprint
+from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
+from homeassistant.const import CONF_ACTIONS, CONF_CONDITIONS, CONF_TRIGGERS
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import frame, script
+from homeassistant.helpers.condition import async_validate_conditions_config
+from homeassistant.helpers.trigger import async_validate_trigger_config
 
 try:
     from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
@@ -94,9 +104,35 @@ _SUPPORTS_SCHEMA = any(
     for param in inspect.signature(Blueprint.__init__).parameters.values()
 )
 
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+_VALIDATION_INPUTS_PATH = _REPOSITORY_ROOT / "tests" / "blueprint_inputs.yaml"
 
-async def validate_one(path: Path) -> bool:
-    """Validate a single blueprint file."""
+
+def _load_validation_inputs() -> dict[str, dict[str, object]]:
+    """Load representative inputs used to expand each blueprint."""
+    data = yaml_util.load_yaml(_VALIDATION_INPUTS_PATH)
+    if not isinstance(data, dict):
+        raise TypeError(
+            f"Validation inputs must be a mapping: {_VALIDATION_INPUTS_PATH}"
+        )
+    return data
+
+
+def _fixture_key(path: Path) -> str:
+    """Return a stable repository-relative fixture key for a blueprint path."""
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(_REPOSITORY_ROOT).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+async def validate_one(
+    hass: HomeAssistant,
+    path: Path,
+    validation_inputs: dict[str, dict[str, object]],
+) -> bool:
+    """Validate a blueprint and a representative expanded automation."""
     try:
         # Parse YAML (supports Home Assistant tags like !input)
         data = yaml_util.load_yaml(path)
@@ -104,23 +140,67 @@ async def validate_one(path: Path) -> bool:
         kwargs: dict[str, object] = {"path": str(path)}
         if _SUPPORTS_SCHEMA and BLUEPRINT_SCHEMA is not None:
             kwargs["schema"] = BLUEPRINT_SCHEMA
-        Blueprint(data, **kwargs)
-        print(f"✅ {path} — valid")
+        blueprint = Blueprint(data, **kwargs)
+
+        key = _fixture_key(path)
+        if key not in validation_inputs:
+            raise ValueError(
+                f"Missing representative inputs for {key} in {_VALIDATION_INPUTS_PATH}"
+            )
+
+        blueprint_inputs = BlueprintInputs(
+            blueprint,
+            {
+                "id": f"validation_{path.stem}",
+                "alias": f"Validation fixture for {path.name}",
+                "use_blueprint": {
+                    "path": key,
+                    "input": validation_inputs[key],
+                },
+            },
+        )
+        blueprint_inputs.validate()
+        expanded_automation = blueprint_inputs.async_substitute()
+        validated_automation = PLATFORM_SCHEMA(expanded_automation)
+        await async_validate_trigger_config(hass, validated_automation[CONF_TRIGGERS])
+        if CONF_CONDITIONS in validated_automation:
+            await async_validate_conditions_config(
+                hass, validated_automation[CONF_CONDITIONS]
+            )
+        await script.async_validate_actions_config(
+            hass, validated_automation[CONF_ACTIONS]
+        )
+
+        print(f"✅ {path} — blueprint and expanded automation valid")
         return True
     except BlueprintException as err:
         print(f"❌ {path}\n    {err}", file=sys.stderr)
         return False
-    except Exception as err:  # pylint: disable=broad-except
+    except Exception as err:  # noqa: BLE001  # pylint: disable=broad-except
         print(f"❌ {path}\n    {err}", file=sys.stderr)
         return False
 
+
 async def main(paths):
+    # Static automation schema validation uses Home Assistant's frame helper for
+    # deprecation reporting, so provide the minimal core context it expects.
+    hass = HomeAssistant(str(_REPOSITORY_ROOT))
+    loader.async_setup(hass)
+    frame.async_setup(hass)
+
+    try:
+        validation_inputs = _load_validation_inputs()
+    except Exception as err:  # noqa: BLE001  # pylint: disable=broad-except
+        print(f"❌ {_VALIDATION_INPUTS_PATH}\n    {err}", file=sys.stderr)
+        sys.exit(1)
+
     ok = True
     for p in paths:
-        if not await validate_one(Path(p)):
+        if not await validate_one(hass, Path(p), validation_inputs):
             ok = False
     if not ok:
         sys.exit(1)
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

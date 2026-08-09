@@ -5,12 +5,20 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - 'blueprints/**/*.ya?ml'
+      - 'blueprints/**/*.yaml'
+      - 'blueprints/**/*.yml'
+      - 'scripts/**/*.py'
+      - 'tests/**'
+      - '.github/workflows/blueprint-validation.yaml'
   push:
     branches:
       - main
     paths:
-      - 'blueprints/**/*.ya?ml'
+      - 'blueprints/**/*.yaml'
+      - 'blueprints/**/*.yml'
+      - 'scripts/**/*.py'
+      - 'tests/**'
+      - '.github/workflows/blueprint-validation.yaml'
 
 jobs:
   blueprint-check:
@@ -40,22 +48,12 @@ jobs:
           print("HA OK", version("homeassistant"), sys.version)
           PY
 
-      - name: Determine files to validate
-        id: files
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            CHANGED=$(
-              git diff --name-only "${{ github.event.pull_request.base.sha }}" \
-                                  "${{ github.sha }}" |
-              grep -E '^blueprints/.*\.ya?ml$' || true
-            )
-            echo "files=${CHANGED}" >> "$GITHUB_OUTPUT"
-          else
-            echo "files=blueprints/**/*.yaml" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Validate blueprints
         run: |
-          FILES="${{ steps.files.outputs.files }}"
-          python scripts/ha_blueprint_validate.py ${FILES:-blueprints/**/*.yaml}
+          mapfile -d '' BLUEPRINT_FILES < <(
+            find blueprints -type f \( -name '*.yaml' -o -name '*.yml' \) -print0
+          )
+          python scripts/ha_blueprint_validate.py "${BLUEPRINT_FILES[@]}"
+
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -p 'test_*.py'
