@@ -92,6 +92,51 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
             "State change clearly initiated by a HA user context", self.classifier
         )
 
+    def test_delayed_damper_restore_is_bounded_to_a_recent_guard(self) -> None:
+        """Only the controller's post-schedule off-to-on rebound is ignored."""
+        user_context = self.classifier.split(
+            "- alias: State change clearly initiated by a HA user context", maxsplit=1
+        )[1].split(
+            "- alias: Ambiguous direct state change, likely HomeKit/physical/device-originated",
+            maxsplit=1,
+        )[0]
+        ambiguous_context = self.classifier.split(
+            "- alias: Ambiguous direct state change, likely HomeKit/physical/device-originated",
+            maxsplit=1,
+        )[1]
+        restore_detection = self.classifier.split(
+            "ambiguous_state_is_delayed_damper_restore: >-", maxsplit=1
+        )[1].split("schedule_guard_duration: >-", maxsplit=1)[0]
+
+        self.assertNotIn("ambiguous_state_is_delayed_damper_restore", user_context)
+        self.assertIn(
+            "Ignore a delayed post-schedule controller damper restoration",
+            ambiguous_context,
+        )
+        self.assertIn(
+            "not (ambiguous_state_is_delayed_damper_restore | bool)",
+            ambiguous_context,
+        )
+        for constraint in (
+            "trigger.entity_id.startswith('switch.')",
+            "trigger.from_state.state != 'off'",
+            "trigger.to_state.state != 'on'",
+            "is_state(head_entity, 'off')",
+            "is_state(schedule_guard_flag_entity, 'off')",
+            "is_state(schedule_guard_timer_entity, 'idle')",
+            "guard_started_at = guard_ended_at - (schedule_hold_seconds | int(30))",
+            "damper_turned_off_at >= guard_started_at",
+            "damper_turned_off_at <= guard_ended_at",
+            "head_turned_off_at >= guard_started_at",
+            "head_turned_off_at <= guard_ended_at",
+            "elapsed >= 0",
+            "elapsed <= restore_window",
+        ):
+            with self.subTest(constraint=constraint):
+                self.assertIn(constraint, restore_detection)
+        self.assertIn("default: 150", self.classifier)
+        self.assertIn("Set to 0 to disable", self.classifier)
+
     def test_settle_conditions_query_live_state(self) -> None:
         """The post-delay conditions must not reuse pre-delay booleans."""
         settle_sequence = self.classifier.split(

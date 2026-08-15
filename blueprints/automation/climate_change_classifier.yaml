@@ -96,6 +96,16 @@ blueprint:
           max: 60
           unit_of_measurement: "s"
 
+    damper_restore_window_seconds:
+      name: Delayed Damper Restore Window
+      description: Seconds after the schedule guard finishes during which a root-context damper off-to-on change is treated as a delayed controller restoration when the head unit remains off. Set to 0 to disable.
+      default: 150
+      selector:
+        number:
+          min: 0
+          max: 900
+          unit_of_measurement: "s"
+
 triggers:
   - trigger: state
     id: temp
@@ -222,6 +232,7 @@ actions:
       damper_entities: !input damper_switches
       schedule_hold_seconds: !input schedule_hold_seconds
       state_settle_seconds: !input state_settle_seconds
+      damper_restore_window_seconds: !input damper_restore_window_seconds
       schedule_guard_flag_entity: !input schedule_guard_flag
       schedule_guard_timer_entity: !input schedule_guard_timer
       manual_override_entity: !input manual_override
@@ -362,6 +373,36 @@ actions:
           true
         {% endif %}
 
+      ambiguous_state_is_delayed_damper_restore: >-
+        {% set restore_window = damper_restore_window_seconds | int(150) %}
+        {% if trigger.platform != 'state'
+              or trigger.from_state is none
+              or trigger.to_state is none
+              or restore_window <= 0 %}
+          false
+        {% elif not trigger.entity_id.startswith('switch.')
+              or trigger.from_state.state != 'off'
+              or trigger.to_state.state != 'on'
+              or not is_state(head_entity, 'off')
+              or not is_state(schedule_guard_flag_entity, 'off')
+              or not is_state(schedule_guard_timer_entity, 'idle') %}
+          false
+        {% else %}
+          {% set restored_at = as_timestamp(trigger.to_state.last_changed, 0) %}
+          {% set guard_ended_at = as_timestamp(states[schedule_guard_timer_entity].last_changed, 0) %}
+          {% set guard_started_at = guard_ended_at - (schedule_hold_seconds | int(30)) %}
+          {% set damper_turned_off_at = as_timestamp(trigger.from_state.last_changed, 0) %}
+          {% set head_turned_off_at = as_timestamp(states[head_entity].last_changed, 0) %}
+          {% set elapsed = restored_at - guard_ended_at %}
+          {{ guard_ended_at > 0
+             and damper_turned_off_at >= guard_started_at
+             and damper_turned_off_at <= guard_ended_at
+             and head_turned_off_at >= guard_started_at
+             and head_turned_off_at <= guard_ended_at
+             and elapsed >= 0
+             and elapsed <= restore_window }}
+        {% endif %}
+
       schedule_guard_duration: >-
         {% set total = schedule_hold_seconds | int(30) %}
         {{ '%02d:%02d:%02d' | format(total // 3600, (total % 3600) // 60, total % 60) }}
@@ -483,6 +524,10 @@ actions:
           - alias: Ignore unavailable, unknown and non-change updates
             condition: template
             value_template: "{{ state_change_is_valid }}"
+          - alias: Ignore a delayed post-schedule controller damper restoration
+            condition: template
+            value_template: >-
+              {{ not (ambiguous_state_is_delayed_damper_restore | bool) }}
           - alias: Do not treat known schedule windows as manual
             condition: template
             value_template: "{{ not (schedule_guard_active | bool) }}"
