@@ -33,6 +33,9 @@ Create an automation from the schedule blueprint and select:
 - The head-unit climate entity and temperature/humidity setpoint helpers.
 - Up to eight zones, each with a damper, sensors, and optional enable flag or
   threshold overrides. Overrides may be numbers or `input_number` entities.
+- For controllers such as Daikin AirBase that reject an all-zones-off state,
+  enable **Keep One Damper Open** and optionally select a preferred spill
+  damper. With no demand, the schedule otherwise retains a currently open zone.
 - Optional zone climate entities for direct temperature synchronization.
 
 Zone climate targets use independent offsets: `head target + heat offset` in
@@ -77,4 +80,8 @@ After updating an imported blueprint, reload automations in Home Assistant.
   watchdog interval shorter than a worst-case automation run.
 - If a zone rejects a temperature update, check its current min/max range and
   increase the zone settle delay.
+- If the controller turns a zone back on after every all-zones-off request,
+  enable **Keep One Damper Open**. Opening a preferred spill zone is ordered
+  before closing the previous zone, which is closed only after another planned
+  airflow damper is confirmed open.
 - Use the automation trace to confirm which trigger and condition stopped a run.
