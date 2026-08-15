@@ -392,13 +392,10 @@ actions:
           {% set guard_ended_at = as_timestamp(states[schedule_guard_timer_entity].last_changed, 0) %}
           {% set guard_started_at = guard_ended_at - (schedule_hold_seconds | int(30)) %}
           {% set damper_turned_off_at = as_timestamp(trigger.from_state.last_changed, 0) %}
-          {% set head_turned_off_at = as_timestamp(states[head_entity].last_changed, 0) %}
           {% set elapsed = restored_at - guard_ended_at %}
           {{ guard_ended_at > 0
              and damper_turned_off_at >= guard_started_at
              and damper_turned_off_at <= guard_ended_at
-             and head_turned_off_at >= guard_started_at
-             and head_turned_off_at <= guard_ended_at
              and elapsed >= 0
              and elapsed <= restore_window }}
         {% endif %}

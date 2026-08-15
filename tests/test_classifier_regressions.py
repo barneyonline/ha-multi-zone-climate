@@ -93,7 +93,7 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
         )
 
     def test_delayed_damper_restore_is_bounded_to_a_recent_guard(self) -> None:
-        """Only the controller's post-schedule off-to-on rebound is ignored."""
+        """A guarded damper-off rebound is ignored even if the head was off."""
         user_context = self.classifier.split(
             "- alias: State change clearly initiated by a HA user context", maxsplit=1
         )[1].split(
@@ -127,13 +127,12 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
             "guard_started_at = guard_ended_at - (schedule_hold_seconds | int(30))",
             "damper_turned_off_at >= guard_started_at",
             "damper_turned_off_at <= guard_ended_at",
-            "head_turned_off_at >= guard_started_at",
-            "head_turned_off_at <= guard_ended_at",
             "elapsed >= 0",
             "elapsed <= restore_window",
         ):
             with self.subTest(constraint=constraint):
                 self.assertIn(constraint, restore_detection)
+        self.assertNotIn("head_turned_off_at", restore_detection)
         self.assertIn("default: 150", self.classifier)
         self.assertIn("Set to 0 to disable", self.classifier)
 
