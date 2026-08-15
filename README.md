@@ -20,7 +20,10 @@ active window has no demand.
 Use the classifier with the schedule's manual-override helper. It watches the
 head unit, zone climate entities, and dampers. Schedule markers and a dedicated
 guard `input_boolean` and `timer` prevent scheduled writes from being mistaken
-for UI, HomeKit, or physical-device changes.
+for UI, HomeKit, or physical-device changes. A bounded post-schedule restore
+window filters the root-context `off` to `on` damper rebound reported by some
+controllers after shutdown. Later HomeKit and physical-device changes still
+enable manual override; set the restore window to zero to disable the filter.
 
 ## Setup
 
