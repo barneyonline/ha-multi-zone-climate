@@ -77,7 +77,7 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
         self.assertIn(
             "Companion schedule announced a monitored control call", self.classifier
         )
-        self.assertEqual(self.schedule.count(f"event: {marker}"), 7)
+        self.assertEqual(self.schedule.count(f"event: {marker}"), 8)
         self.assertEqual(
             self.schedule.count(f"event: {marker}"),
             self.schedule.count("action: climate.")
@@ -236,6 +236,51 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
             self.schedule.count('for_each: "{{ damper_updates }}"'), 2
         )
         self.assertNotIn('for_each: "{{ zone_data_for_mode }}"', self.schedule)
+
+    def test_schedule_can_retain_a_spill_damper_when_demand_is_off(self) -> None:
+        """Opt-in spill handling must never plan an all-dampers-off state."""
+        planner = self.schedule.split("damper_updates: >-", maxsplit=1)[1].split(
+            "  - choose:", maxsplit=1
+        )[0]
+        self.assertIn("keep_one_damper_open: !input keep_one_damper_open", self.schedule)
+        self.assertIn(
+            "preferred_spill_damper: !input preferred_spill_damper", self.schedule
+        )
+        self.assertIn("ns.demand_switches | length == 0", planner)
+        self.assertIn("is_state(item.switch, 'on')", planner)
+        self.assertIn("item.switch == ns.keeper", planner)
+        self.assertIn("ns.open_items + ns.close_items", planner)
+        self.assertIn("keep_one_damper_open: true", self.inputs)
+        self.assertIn(
+            "preferred_spill_damper: switch.validation_main_damper", self.inputs
+        )
+
+    def test_inactive_schedule_can_open_the_spill_damper_before_closing(self) -> None:
+        """The shutdown path must confirm the spill damper before closing."""
+        inactive_sequence = self.schedule.split(
+            "- conditions: \"{{ (schedule_active | bool) and not (automation_active | bool)",
+            maxsplit=1,
+        )[1].split(
+            "- conditions: \"{{ (automation_active | bool)", maxsplit=1
+        )[0]
+        self.assertIn("repeat.item.desired == 'on'", inactive_sequence)
+        self.assertIn("action: switch.turn_on", inactive_sequence)
+        self.assertIn("repeat.item.airflow_switches", inactive_sequence)
+        self.assertIn("expand(repeat.item.airflow_switches)", inactive_sequence)
+        self.assertLess(
+            self.schedule.index("{{ ns.open_items + ns.close_items }}"),
+            self.schedule.index('for_each: "{{ damper_updates }}"'),
+        )
+
+    def test_every_damper_close_requires_a_live_airflow_path(self) -> None:
+        """A failed or delayed open command must leave the old zone open."""
+        self.assertIn("'airflow_switches': ns.airflow_switches", self.schedule)
+        self.assertEqual(
+            self.schedule.count("expand(repeat.item.airflow_switches)"), 2
+        )
+        self.assertEqual(
+            self.schedule.count("selectattr('state', 'eq', 'on')"), 2
+        )
 
     def test_heat_and_cool_zone_offsets_are_independent(self) -> None:
         """Narrow-range zone climates need distinct heat and cool targets."""

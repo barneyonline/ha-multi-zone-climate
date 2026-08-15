@@ -91,6 +91,20 @@ blueprint:
       default: true
       selector: { boolean: {} }
 
+    keep_one_damper_open:
+      name: Keep One Damper Open
+      description: Prevent controllers that reject an all-zones-off state from bouncing a damper back on. When no zone has demand, retain a currently open damper or open the preferred spill damper below. Disabled by default for compatibility with existing schedules.
+      default: false
+      selector: { boolean: {} }
+
+    preferred_spill_damper:
+      name: Preferred Spill Damper (optional)
+      description: Damper to keep open when no zone has demand. It must also appear in Zones Configuration. If omitted or unavailable, the blueprint retains the first currently open damper, then falls back to the first available configured damper.
+      default: ""
+      selector:
+        entity:
+          domain: switch
+
     damper_controller_available:
       name: Damper Controller Availability Entity (optional)
       description: Optional binary_sensor, sensor, or switch that reports whether the damper controller is reachable. If provided, damper service calls are skipped unless this entity is on, home, open, or connected.
@@ -458,6 +472,8 @@ actions:
       allow_dry: !input allow_dry
       control_head: !input control_head_unit
       control_dampers: !input control_dampers
+      keep_one_damper_open: !input keep_one_damper_open
+      preferred_spill_damper: !input preferred_spill_damper
       damper_controller_available_entity: !input damper_controller_available
       zone_temp_entities: !input zone_temperature_entities
       zone_heat_temp_offset: !input zone_temperature_offset
@@ -723,7 +739,7 @@ actions:
         {% endif %}
 
       damper_updates: >-
-        {% set ns = namespace(items=[]) %}
+        {% set ns = namespace(open_items=[], close_items=[], demand_switches=[], airflow_switches=[], keeper=none) %}
         {% if control_dampers and (dampers_available | bool) %}
           {% set candidates = zone_data_for_mode if (automation_active | bool) else zone_data %}
           {% for item in candidates %}
@@ -731,18 +747,61 @@ actions:
                and ((mode == 'heat' and item.heat > 0)
                  or (mode == 'cool' and item.cool > 0)
                  or (mode == 'dry' and item.dry > 0)) %}
+            {% if wants_open %}
+              {% set ns.demand_switches = ns.demand_switches + [item.switch] %}
+            {% endif %}
+          {% endfor %}
+
+          {# Some zone controllers will not retain an all-zones-off setting. #}
+          {% if (keep_one_damper_open | bool) and ns.demand_switches | length == 0 %}
+            {% set candidate_switches = candidates | map(attribute='switch') | list %}
+            {% if preferred_spill_damper not in [none, '', []]
+               and preferred_spill_damper in candidate_switches
+               and states(preferred_spill_damper) not in ['unknown', 'unavailable'] %}
+              {% set ns.keeper = preferred_spill_damper %}
+            {% endif %}
+            {% if ns.keeper is none %}
+              {% for item in candidates %}
+                {% if ns.keeper is none and is_state(item.switch, 'on') %}
+                  {% set ns.keeper = item.switch %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+            {% if ns.keeper is none %}
+              {% for item in candidates %}
+                {% if ns.keeper is none and states(item.switch) not in ['unknown', 'unavailable'] %}
+                  {% set ns.keeper = item.switch %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          {% endif %}
+
+          {% set ns.airflow_switches = ns.demand_switches %}
+          {% if ns.keeper is not none %}
+            {% set ns.airflow_switches = ns.airflow_switches + [ns.keeper] %}
+          {% endif %}
+
+          {% for item in candidates %}
+            {% set wants_open = item.switch in ns.demand_switches or item.switch == ns.keeper %}
             {% set switch_state = states(item.switch) %}
             {% if switch_state not in ['unknown', 'unavailable']
                and ((wants_open and switch_state != 'on')
                  or ((not wants_open) and switch_state == 'on')) %}
-              {% set ns.items = ns.items + [{
+              {% set update = {
                 'switch': item.switch,
-                'desired': 'on' if wants_open else 'off'
-              }] %}
+                'desired': 'on' if wants_open else 'off',
+                'airflow_switches': ns.airflow_switches
+              } %}
+              {% if wants_open %}
+                {% set ns.open_items = ns.open_items + [update] %}
+              {% else %}
+                {% set ns.close_items = ns.close_items + [update] %}
+              {% endif %}
             {% endif %}
           {% endfor %}
         {% endif %}
-        {{ ns.items }}
+        {# Always establish an airflow path before closing the previous one. #}
+        {{ ns.open_items + ns.close_items }}
 
   - choose:
       - conditions: "{{ (schedule_active | bool) and not (automation_active | bool) and is_state(manual_override_entity, 'off') }}"
@@ -774,15 +833,30 @@ actions:
                         - condition: state
                           entity_id: !input manual_override
                           state: "off"
-                        - condition: template
-                          value_template: "{{ states(repeat.item.switch) == 'on' }}"
-                        - event: multi_zone_climate_scheduled_control
-                          event_data:
-                            entity_id: "{{ repeat.item.switch }}"
-                        - action: switch.turn_off
-                          continue_on_error: true
-                          target:
-                            entity_id: "{{ repeat.item.switch }}"
+                        - choose:
+                            - conditions: "{{ repeat.item.desired == 'on' and states(repeat.item.switch) != 'on' }}"
+                              sequence:
+                                - event: multi_zone_climate_scheduled_control
+                                  event_data:
+                                    entity_id: "{{ repeat.item.switch }}"
+                                - action: switch.turn_on
+                                  continue_on_error: true
+                                  target:
+                                    entity_id: "{{ repeat.item.switch }}"
+                            - conditions: >-
+                                {{ repeat.item.desired == 'off'
+                                   and states(repeat.item.switch) == 'on'
+                                   and (repeat.item.airflow_switches | length == 0
+                                     or expand(repeat.item.airflow_switches)
+                                       | selectattr('state', 'eq', 'on') | list | count > 0) }}
+                              sequence:
+                                - event: multi_zone_climate_scheduled_control
+                                  event_data:
+                                    entity_id: "{{ repeat.item.switch }}"
+                                - action: switch.turn_off
+                                  continue_on_error: true
+                                  target:
+                                    entity_id: "{{ repeat.item.switch }}"
 
       - conditions: "{{ (automation_active | bool) and is_state(manual_override_entity, 'off') }}"
         sequence:
@@ -937,7 +1011,12 @@ actions:
                                   continue_on_error: true
                                   target:
                                     entity_id: "{{ repeat.item.switch }}"
-                            - conditions: "{{ repeat.item.desired == 'off' and states(repeat.item.switch) == 'on' }}"
+                            - conditions: >-
+                                {{ repeat.item.desired == 'off'
+                                   and states(repeat.item.switch) == 'on'
+                                   and (repeat.item.airflow_switches | length == 0
+                                     or expand(repeat.item.airflow_switches)
+                                       | selectattr('state', 'eq', 'on') | list | count > 0) }}
                               sequence:
                                 - event: multi_zone_climate_scheduled_control
                                   event_data:

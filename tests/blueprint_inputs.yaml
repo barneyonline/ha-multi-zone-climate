@@ -35,6 +35,8 @@ blueprints/automation/multi_zone_climate.yaml:
     - climate.validation_main_temperature
     - climate.validation_bedrooms_temperature
   zone_cool_temperature_offset: 3
+  keep_one_damper_open: true
+  preferred_spill_damper: switch.validation_main_damper
   zones:
     - name: Main
       damper_switch: switch.validation_main_damper
