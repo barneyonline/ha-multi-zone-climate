@@ -30,12 +30,12 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.14'
 
       - name: Install Home Assistant Core
         env:
-          HA_VERSION: '2025.6.0'
-          HA_CONSTRAINTS: 'https://raw.githubusercontent.com/home-assistant/core/2025.6.0/homeassistant/package_constraints.txt'
+          HA_VERSION: '2026.8.3'
+          HA_CONSTRAINTS: 'https://raw.githubusercontent.com/home-assistant/core/2026.8.3/homeassistant/package_constraints.txt'
         run: |
           python --version
           python -m pip install --upgrade pip
