@@ -88,7 +88,7 @@ from homeassistant.components.blueprint.errors import BlueprintException
 from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
 from homeassistant.const import CONF_ACTIONS, CONF_CONDITIONS, CONF_TRIGGERS
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import frame, script
+from homeassistant.helpers import frame, script, trigger
 from homeassistant.helpers.condition import async_validate_conditions_config
 from homeassistant.helpers.trigger import async_validate_trigger_config
 
@@ -187,6 +187,11 @@ async def main(paths):
     hass = HomeAssistant(str(_REPOSITORY_ROOT))
     loader.async_setup(hass)
     frame.async_setup(hass)
+    # Home Assistant 2026.8+ requires the trigger helper registry to be
+    # initialized before standalone trigger validation. Older supported Core
+    # versions do not expose this setup hook.
+    if setup_trigger_helper := getattr(trigger, "async_setup", None):
+        await setup_trigger_helper(hass)
 
     try:
         validation_inputs = _load_validation_inputs()

@@ -8,6 +8,7 @@ CLASSIFIER_PATH = (
     REPOSITORY_ROOT / "blueprints" / "automation" / "climate_change_classifier.yaml"
 )
 WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "blueprint-validation.yaml"
+VALIDATOR_PATH = REPOSITORY_ROOT / "scripts" / "ha_blueprint_validate.py"
 INPUTS_PATH = REPOSITORY_ROOT / "tests" / "blueprint_inputs.yaml"
 SCHEDULE_PATH = (
     REPOSITORY_ROOT / "blueprints" / "automation" / "multi_zone_climate.yaml"
@@ -22,6 +23,7 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
         cls.classifier = CLASSIFIER_PATH.read_text(encoding="utf-8")
         cls.schedule = SCHEDULE_PATH.read_text(encoding="utf-8")
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        cls.validator = VALIDATOR_PATH.read_text(encoding="utf-8")
         cls.inputs = INPUTS_PATH.read_text(encoding="utf-8")
 
     def test_guard_is_driven_by_monitored_control_calls(self) -> None:
@@ -182,6 +184,13 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
         self.assertNotIn("GITHUB_OUTPUT", self.workflow)
         self.assertIn("BLUEPRINT_FILES", self.workflow)
         self.assertIn("python -m unittest discover", self.workflow)
+
+    def test_ci_validates_stable_home_assistant_on_python_314(self) -> None:
+        """The supported stable Home Assistant runtime must be exercised in CI."""
+        self.assertIn("python-version: '3.14'", self.workflow)
+        self.assertIn("HA_VERSION: '2026.8.3'", self.workflow)
+        self.assertNotIn("python-version: '3.13'", self.workflow)
+        self.assertIn('getattr(trigger, "async_setup", None)', self.validator)
 
     def test_schedule_gates_expensive_zone_evaluation(self) -> None:
         """Inactive windows must stop before sensor expansion and zone scoring."""
