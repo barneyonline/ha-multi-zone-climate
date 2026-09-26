@@ -41,7 +41,10 @@ Create an automation from the schedule blueprint and select:
 Zone climate targets use independent offsets: `head target + heat offset` in
 heat mode and `head target - cool offset` in cool mode. Targets outside an
 entity's advertised range are skipped. Increase the zone settle delay if the
-controller needs extra time after a mode or head-unit setpoint change.
+controller needs extra time after a mode or head-unit setpoint change. Zone
+temperature writes run sequentially because zones can share one controller.
+Before each write, the schedule rechecks manual override, the head/zone mode,
+and whether the target temperature still needs changing.
 
 ```yaml
 zones:
@@ -77,7 +80,11 @@ After updating an imported blueprint, reload automations in Home Assistant.
 
 - AirBase `get_zone_setting` or `set_zone_setting` timeouts indicate a controller
   or network problem. Configure a controller availability entity and avoid a
-  watchdog interval shorter than a worst-case automation run.
+  watchdog interval shorter than a worst-case automation run. Zone writes are
+  serialized to avoid concurrent requests from this automation. A raw Daikin
+  `TimeoutError` still aborts the run: Home Assistant does not suppress it with
+  `continue_on_error`. The next watchdog run reevaluates outstanding changes;
+  persistent timeouts require investigating the controller/network.
 - If a zone rejects a temperature update, check its current min/max range and
   increase the zone settle delay.
 - If the controller turns a zone back on after every all-zones-off request,
