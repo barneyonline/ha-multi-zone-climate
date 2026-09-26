@@ -951,34 +951,34 @@ actions:
                                   - condition: state
                                     entity_id: !input manual_override
                                     state: "off"
-                                  - variables:
-                                      batched_extra_temp_targets: >-
-                                        {% if states(head_entity) != mode %}
-                                          []
-                                        {% else %}
-                                          {% set ns = namespace(ids=[]) %}
-                                          {% set target = (zone_set_temp | float) | round(2) %}
-                                          {% for entity in ready_extra_temp_targets_to_update %}
-                                            {% set current = state_attr(entity, 'temperature') %}
-                                            {% if states(entity) == mode
-                                               and (current in [none, '', 'unknown', 'unavailable']
-                                                 or ((current | float) | round(2)) != target) %}
-                                              {% set ns.ids = ns.ids + [entity] %}
-                                            {% endif %}
-                                          {% endfor %}
-                                          {{ ns.ids }}
-                                        {% endif %}
-                                  - condition: template
-                                    value_template: "{{ batched_extra_temp_targets | length > 0 }}"
-                                  - event: multi_zone_climate_scheduled_control
-                                    event_data:
-                                      entity_id: "{{ batched_extra_temp_targets }}"
-                                  - action: climate.set_temperature
-                                    continue_on_error: true
-                                    target:
-                                      entity_id: "{{ batched_extra_temp_targets }}"
-                                    data:
-                                      temperature: "{{ zone_set_temp }}"
+                                  # A multi-entity service call runs zone writes concurrently.
+                                  # AirBase zones share one controller; await each write.
+                                  - repeat:
+                                      for_each: "{{ ready_extra_temp_targets_to_update }}"
+                                      sequence:
+                                        - condition: state
+                                          entity_id: !input manual_override
+                                          state: "off"
+                                        - condition: template
+                                          value_template: "{{ states(head_entity) == mode }}"
+                                        - if:
+                                            - condition: template
+                                              value_template: >-
+                                                {% set current = state_attr(repeat.item, 'temperature') %}
+                                                {% set target = (zone_set_temp | float) | round(2) %}
+                                                {{ states(repeat.item) == mode
+                                                   and (current in [none, '', 'unknown', 'unavailable']
+                                                     or ((current | float) | round(2)) != target) }}
+                                          then:
+                                            - event: multi_zone_climate_scheduled_control
+                                              event_data:
+                                                entity_id: "{{ repeat.item }}"
+                                            - action: climate.set_temperature
+                                              continue_on_error: true
+                                              target:
+                                                entity_id: "{{ repeat.item }}"
+                                              data:
+                                                temperature: "{{ zone_set_temp }}"
 
           - choose:
               - conditions: "{{ control_dampers and dampers_available }}"

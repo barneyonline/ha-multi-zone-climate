@@ -235,11 +235,11 @@ class ClimateChangeClassifierRegressionTests(unittest.TestCase):
         self.assertNotIn("sort(attribute='urgency'", zone_model)
         self.assertNotIn("map(attribute='heat')", self.schedule)
 
-    def test_zone_writes_are_batched_and_only_changed_dampers_are_staggered(self) -> None:
+    def test_zone_writes_are_sequential_and_only_changed_dampers_are_staggered(self) -> None:
         """No-op entities should not add service calls or artificial delays."""
-        self.assertIn("batched_extra_temp_targets", self.schedule)
+        self.assertNotIn("batched_extra_temp_targets", self.schedule)
         self.assertIn(
-            'entity_id: "{{ batched_extra_temp_targets }}"', self.schedule
+            'for_each: "{{ ready_extra_temp_targets_to_update }}"', self.schedule
         )
         self.assertEqual(
             self.schedule.count('for_each: "{{ damper_updates }}"'), 2
