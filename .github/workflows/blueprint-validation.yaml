@@ -20,6 +20,9 @@ on:
       - 'tests/**'
       - '.github/workflows/blueprint-validation.yaml'
 
+permissions:
+  contents: read
+
 jobs:
   blueprint-check:
     runs-on: ubuntu-latest
