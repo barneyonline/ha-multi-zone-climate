@@ -44,7 +44,10 @@ entity's advertised range are skipped. Increase the zone settle delay if the
 controller needs extra time after a mode or head-unit setpoint change. Zone
 temperature writes run sequentially because zones can share one controller.
 Before each write, the schedule rechecks manual override, the head/zone mode,
-and whether the target temperature still needs changing.
+temperature support, the current range and step, and whether the target
+temperature still needs changing. Range checks happen after the head-unit
+updates and settle delay because a zone's accepted range can move with the
+head-unit setpoint. An invalid target is skipped while later zones continue.
 
 ```yaml
 zones:
@@ -82,11 +85,13 @@ After updating an imported blueprint, reload automations in Home Assistant.
   or network problem. Configure a controller availability entity and avoid a
   watchdog interval shorter than a worst-case automation run. Zone writes are
   serialized to avoid concurrent requests from this automation. A raw Daikin
-  `TimeoutError` still aborts the run: Home Assistant does not suppress it with
+  `TimeoutError` can still abort the run on older Home Assistant versions despite
   `continue_on_error`. The next watchdog run reevaluates outstanding changes;
   persistent timeouts require investigating the controller/network.
-- If a zone rejects a temperature update, check its current min/max range and
-  increase the zone settle delay.
+- If a zone temperature is skipped, check its current min/max range and step.
+  Daikin AirBase zone targets must stay within 2°C of the head-unit setpoint,
+  so use zone offsets of at most 2°C. Increase the zone settle delay if the
+  controller needs more time to report its updated range.
 - If the controller turns a zone back on after every all-zones-off request,
   enable **Keep One Damper Open**. Opening a preferred spill zone is ordered
   before closing the previous zone, which is closed only after another planned
