@@ -692,18 +692,8 @@ actions:
             {% set current = state_attr(entity, 'temperature') %}
             {% set supported_features = state_attr(entity, 'supported_features') | int(0) %}
             {% set supports_target_temperature = (supported_features % 2) == 1 %}
-            {% set min_value = state_attr(entity, 'min_temp') | float(default=none) %}
-            {% set max_value = state_attr(entity, 'max_temp') | float(default=none) %}
-            {% set step = state_attr(entity, 'target_temp_step') | float(0) %}
-            {% set step_ok = true %}
-            {% if step > 0 %}
-              {% set rounded = (((target / step) | round(0)) * step) | round(4) %}
-              {% set step_ok = ((rounded - target) | abs) < 0.001 %}
-            {% endif %}
+            {# Range and step may change with the head setpoint; check at write time. #}
             {% if supports_target_temperature
-               and (min_value is none or target >= min_value)
-               and (max_value is none or target <= max_value)
-               and step_ok
                and (current in [none, '', 'unknown', 'unavailable']
                  or ((current | float) | round(2)) != target) %}
               {% set ns.ids = ns.ids + [entity] %}
@@ -966,7 +956,20 @@ actions:
                                               value_template: >-
                                                 {% set current = state_attr(repeat.item, 'temperature') %}
                                                 {% set target = (zone_set_temp | float) | round(2) %}
+                                                {% set supported_features = state_attr(repeat.item, 'supported_features') | int(0) %}
+                                                {% set min_value = state_attr(repeat.item, 'min_temp') | float(default=none) %}
+                                                {% set max_value = state_attr(repeat.item, 'max_temp') | float(default=none) %}
+                                                {% set step = state_attr(repeat.item, 'target_temp_step') | float(0) %}
+                                                {% set step_ok = true %}
+                                                {% if step > 0 %}
+                                                  {% set rounded = (((target / step) | round(0)) * step) | round(4) %}
+                                                  {% set step_ok = ((rounded - target) | abs) < 0.001 %}
+                                                {% endif %}
                                                 {{ states(repeat.item) == mode
+                                                   and (supported_features % 2) == 1
+                                                   and (min_value is none or target >= min_value)
+                                                   and (max_value is none or target <= max_value)
+                                                   and step_ok
                                                    and (current in [none, '', 'unknown', 'unavailable']
                                                      or ((current | float) | round(2)) != target) }}
                                           then:
